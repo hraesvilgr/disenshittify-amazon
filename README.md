@@ -1,6 +1,8 @@
 # Disenshittify Amazon
 
-A Firefox extension for Amazon search results. It adds a **Disenshittify** toggle at the top of the left-hand filter column. Turning it on:
+**[⬇ Install](https://github.com/hraesvilgr/disenshittify-amazon/raw/main/dist/disenshittify-amazon.user.js)** — needs the [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/) browser extension. Click the link, then **Install**.
+
+A userscript (and Firefox extension) for Amazon search results. It adds a **Disenshittify** toggle at the top of the left-hand filter column. Turning it on:
 
 - gives every listing a trust score (0–100) and tier (1–5),
 - tints each card from green (trusted) through yellow to red (junk), with a coloured edge,
@@ -26,11 +28,12 @@ Turning it off puts the page back the way Amazon served it. The toggle state is 
 - **Add-on:** `storage`, and content scripts on the same search-page URLs only (no broader host access).
 - **Nothing is sent anywhere.** The code makes no network requests of any kind; everything is read from the page you're viewing.
 - **Stored locally, in the script's private storage:** whether it's on, your Sort by choice, the search term where you last picked "Featured", your brand votes, and learned brand data (product IDs, scores, review counts, and up to 20 search terms per brand, capped at 3,000 brands). "Reset learning" under Brands clears the learned data; removing the script clears everything. Nothing is written to amazon.com's own storage (a v0.1 leftover there is migrated and deleted on first run).
-- Listing text is only ever inserted as plain text (no `innerHTML`/`eval`), so a listing title can't inject code. There's no auto-update URL.
+- Listing text is only ever inserted as plain text (no `innerHTML`/`eval`), so a listing title can't inject code.
+- **Updates:** installed from the link above, Tampermonkey/Violentmonkey check this repository for newer versions and update automatically when `@version` goes up. Installed by pasting the script in by hand, it never updates on its own.
 
 ## Install
 
-**Userscript (no signing needed):** install Tampermonkey or Violentmonkey, create a new script, paste in `dist/disenshittify-amazon.user.js`, save, and reload Amazon. Rebuild it with `node tools/build_userscript.js` after changing anything in `src/`.
+**Userscript (no signing needed):** install Tampermonkey or Violentmonkey, then open the **[Install](https://github.com/hraesvilgr/disenshittify-amazon/raw/main/dist/disenshittify-amazon.user.js)** link and click **Install**. (Or create a new script and paste in `dist/disenshittify-amazon.user.js` by hand.) Reload Amazon afterwards. Rebuild it with `node tools/build_userscript.js` after changing anything in `src/`, and raise the version in `manifest.json` (the userscript's `@version` comes from it) so installed copies pick up the update.
 
 **Temporary add-on (for testing)**
 
