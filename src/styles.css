@@ -1,0 +1,200 @@
+/* Disenshittify Amazon — injected styles. Everything is prefixed dsa- to stay out of Amazon's way. */
+
+/* ---------- toggle ---------- */
+#dsa-toggle {
+  box-sizing: border-box;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 2px solid #8bc34a;
+  border-radius: 10px;
+  background: #fbfdf7;
+  font-family: "Amazon Ember", Arial, sans-serif;
+  color: #0f1111;
+}
+#dsa-toggle.dsa-inline { max-width: 360px; margin: 8px 0 12px; }
+
+.dsa-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.dsa-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.dsa-track {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 22px;
+  border-radius: 11px;
+  background: #b9bdbd;
+  transition: background 0.15s;
+}
+.dsa-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s;
+}
+.dsa-switch input:checked + .dsa-track { background: #2e7d32; }
+.dsa-switch input:checked + .dsa-track .dsa-thumb { transform: translateX(18px); }
+.dsa-switch input:focus-visible + .dsa-track { outline: 2px solid #007185; outline-offset: 2px; }
+.dsa-label { font-size: 16px; font-weight: 700; }
+.dsa-unit { margin-bottom: 6px; }
+
+.dsa-status { margin: 6px 0 0 50px; font-size: 12px; color: #565959; }
+.dsa-legend { margin: 8px 0 0 50px; }
+.dsa-legend span {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, hsl(120 70% 40%), hsl(60 70% 45%), hsl(0 70% 45%));
+}
+
+/* ---------- rated cards ---------- */
+.dsa-paint {
+  background: var(--dsa-bg) !important;
+  box-shadow: inset 6px 0 0 var(--dsa-edge) !important;
+  border-radius: 8px;
+}
+/* Amazon paints white boxes inside the card; let the tint show through. */
+.dsa-paint .a-section,
+.dsa-paint .s-card-border,
+.dsa-paint .puis-card-border,
+.dsa-paint .s-card-container,
+.dsa-paint .puis-padding-left-small {
+  background: transparent !important;
+}
+/* Keep product photos true to colour: a plain white box behind the image, no blending. */
+.dsa-paint .s-product-image-container {
+  background: #fff !important;
+  border-radius: 6px;
+}
+.dsa-paint .s-image { mix-blend-mode: normal !important; }
+
+.dsa-dupe { display: none !important; }
+
+/* ---------- trust badge: a small pill over the card's top-right corner ---------- */
+.dsa-rated { position: relative; }
+.dsa-rated:has(.dsa-badge[open]) { z-index: 60; }
+.dsa-wide [data-cy="title-recipe"] { padding-right: 130px; }       /* open popover sits above neighbouring cards */
+.dsa-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 30;
+  font: 12px/1.35 "Amazon Ember", Arial, sans-serif;
+  color: var(--dsa-ink);
+  text-align: left;
+}
+.dsa-badge > summary {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 11px;
+  background: var(--dsa-edge);
+  color: #fff;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  list-style: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+.dsa-badge > summary::-webkit-details-marker { display: none; }
+.dsa-badge > summary::marker { content: ""; }
+.dsa-badge > summary::after { content: " \25BE"; font-weight: 400; }
+.dsa-badge[open] > summary::after { content: " \25B4"; }
+.dsa-badge .dsa-score { font-weight: 400; opacity: 0.85; }
+.dsa-badge li { margin: 1px 0; white-space: pre-wrap; padding-left: 2.2em; text-indent: -2.2em; }
+.dsa-badge li.dsa-good { color: #1e6b25; }
+.dsa-badge li.dsa-bad { color: #9b1c1c; }
+
+/* ---------- brand buttons (badge + manager) ---------- */
+.dsa-badge-body {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  width: 280px;
+  max-width: 80vw;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--dsa-edge);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+}
+
+.dsa-badge .dsa-badge-body ul { margin: 0; padding: 0; list-style: none; background: none; }
+.dsa-brandrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+}
+.dsa-brandname { font-weight: 700; color: #0f1111; margin-right: auto; }
+.dsa-muted { color: #565959; font-size: 12px; }
+.dsa-btn {
+  font: 12px/1 "Amazon Ember", Arial, sans-serif;
+  padding: 5px 9px;
+  border: 1px solid #b9bdbd;
+  border-radius: 12px;
+  background: #fff;
+  color: #0f1111;
+  cursor: pointer;
+}
+.dsa-btn:hover { background: #f3f3f3; }
+.dsa-btn.dsa-trust { border-color: #2e7d32; color: #1e6b25; }
+.dsa-btn.dsa-block { border-color: #b71c1c; color: #9b1c1c; }
+.dsa-btn.dsa-on.dsa-trust { background: #2e7d32; color: #fff; }
+.dsa-btn.dsa-on.dsa-block { background: #b71c1c; color: #fff; }
+.dsa-btn.dsa-x { padding: 3px 8px; font-size: 14px; }
+.dsa-btn.dsa-reset { margin-left: auto; }
+
+.dsa-manage {
+  display: block;
+  margin: 8px 0 0 50px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #007185;
+  font: 12px "Amazon Ember", Arial, sans-serif;
+  cursor: pointer;
+  text-align: left;
+}
+.dsa-manage:hover { text-decoration: underline; }
+.dsa-panel {
+  margin-top: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+  font: 12px/1.4 "Amazon Ember", Arial, sans-serif;
+}
+.dsa-panel[hidden] { display: none; }
+.dsa-phead { margin: 8px 0 4px; font-weight: 700; font-size: 12px; }
+.dsa-plist { margin: 0; padding: 0; list-style: none; }
+.dsa-pitem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid #eee;
+}
+.dsa-pname { font-weight: 700; margin-right: auto; word-break: break-word; }
+.dsa-ptag { font-size: 11px; padding: 1px 6px; border-radius: 8px; color: #fff; }
+.dsa-ptag.dsa-trust { background: #2e7d32; }
+.dsa-ptag.dsa-block { background: #b71c1c; }
+.dsa-pactions { display: flex; gap: 4px; width: 100%; justify-content: flex-end; }
+.dsa-pitem .dsa-btn { padding: 3px 7px; font-size: 11px; }
+.dsa-pfoot { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+
+/* ---------- promos / ad blocks between results ---------- */
+.dsa-clutter,
+.dsa-stray-head { display: none !important; }
