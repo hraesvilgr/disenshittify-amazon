@@ -198,3 +198,40 @@
 /* ---------- promos / ad blocks between results ---------- */
 .dsa-clutter,
 .dsa-stray-head { display: none !important; }
+
+/* ---------- product page panel ---------- */
+.dsa-checked { font-weight: 700; }
+.dsa-product {
+  margin: 8px 0 10px;
+  padding: 8px 12px 8px 14px;
+  border-radius: 8px;
+  background: var(--dsa-bg);
+  box-shadow: inset 6px 0 0 var(--dsa-edge);
+  font: 13px/1.4 "Amazon Ember", Arial, sans-serif;
+  color: #0f1111;
+}
+.dsa-ph-head { display: flex; align-items: center; gap: 8px; }
+.dsa-ph-pill {
+  padding: 2px 9px;
+  border-radius: 11px;
+  background: var(--dsa-edge);
+  color: #fff;
+  font-weight: 700;
+}
+.dsa-ph-title { font-weight: 700; color: var(--dsa-ink); margin-left: auto; }
+.dsa-ph-delta { font-weight: 700; font-size: 15px; cursor: help; }
+.dsa-ph-delta.dsa-up { color: #1e6b25; }
+.dsa-ph-delta.dsa-down { color: #9b1c1c; }
+.dsa-ph-delta.dsa-same { color: #565959; }
+.dsa-ph-compare { margin-top: 6px; }
+.dsa-delta { font-weight: 700; padding: 1px 6px; border-radius: 8px; }
+.dsa-delta.dsa-up { color: #1e6b25; background: rgba(46, 125, 50, 0.12); }
+.dsa-delta.dsa-down { color: #9b1c1c; background: rgba(183, 28, 28, 0.1); }
+.dsa-delta.dsa-same { color: #565959; background: rgba(0, 0, 0, 0.06); }
+.dsa-ph-details { margin-top: 6px; }
+.dsa-ph-details > summary { cursor: pointer; color: #007185; }
+.dsa-ph-list { margin: 6px 0; padding: 0; list-style: none; }
+.dsa-ph-list li { margin: 1px 0; padding-left: 2.6em; text-indent: -2.6em; }
+.dsa-ph-list li.dsa-good { color: #1e6b25; }
+.dsa-ph-list li.dsa-bad { color: #9b1c1c; }
+.dsa-product-error { --dsa-bg: #f3f3f3; --dsa-edge: #888; --dsa-ink: #565959; }

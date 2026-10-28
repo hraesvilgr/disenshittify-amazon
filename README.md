@@ -2,6 +2,8 @@
 
 **[⬇ Install](https://github.com/hraesvilgr/disenshittify-amazon/raw/main/dist/disenshittify-amazon.user.js)** — needs the [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/) browser extension. Click the link, then **Install**.
 
+[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/K4R529MTQE)
+
 A userscript (and Firefox extension) for Amazon search results. It adds a **Disenshittify** toggle at the top of the left-hand filter column. Turning it on:
 
 - gives every listing a trust score (0–100) and tier (1–5),
@@ -20,14 +22,28 @@ Inside each badge are **Trust** and **Block** buttons for that listing's brand. 
 
 Picking either stays in effect on later searches until you pick one of Amazon's sorts. Amazon's sorts keep Amazon's order with the colours and badges; picking **Featured** shows Amazon's real Featured order for that search. Unlike Amazon's sorts, the Disenshittified ones re-order the results already on the page (each results page separately) and don't change the URL.
 
+**Product pages.** Click through to a listing and a panel under the title gives a better rating from what only the product page shows, compared with the search-results estimate. Next to the Trust pill, ▲12 / ▼17 / – shows how far the score moved (hover for from → to); opened without searching first, it compares against the rating from the title, stars and review count alone — and lists what changed:
+
+- the brand Amazon states for the listing (instead of the guess from the title), and the exact review count and, where shown, the "Date First Available";
+- **Sold by Amazon.com** (+5), or sold by an anonymous trading account such as "luoyanggezhibushangmaoyouxiangongsi" (−6);
+- bullet points: 【bracketed】 headings (−6), marketing phrases (−4), deliberately broken words like "baguett-e" (−10), customer-service hard sell (−4), walls of text over 1,300 / 1,800 characters (−3 / −6), or short factual bullets under 600 characters (+3);
+- extreme rating spreads only (15%+ 1-star, or 85%+ 5-star with under 6% 4-star) — ordinary spreads don't separate junk from real brands;
+- Amazon's own "Frequently returned item" warning (−12).
+
+If Amazon opens a different size or colour than the result you clicked (it often reopens the size you picked last time), or you switch variants on the page, the comparison is with the result you clicked. If a page can't be read, the panel says so and shows the error.
+
+Back on the search results, a checked listing uses the refined rating for 30 days and its pill gets a ✓. Settings live in `productWeights` in `src/config.js`.
+
+**Books, films, TV, music and games are left alone.** The trust signals are for physical goods, so books (print, Kindle, audiobooks), films and TV (DVD, Blu-ray, Prime Video), music (CDs, vinyl) and video games get no rating. Their product pages get no panel; a search where nearly all the results (80%+) are media gets no Disenshittify at all (no toggle, nothing re-ordered or removed); on mixed searches the media results get no badge or colour and keep the places Amazon gave them, with the rated listings sorted around them — so a search for a game keeps the game on top. Game controllers, consoles, headsets, chargers and other accessories are still rated.
+
 Turning it off puts the page back the way Amazon served it. The toggle state is remembered, so it stays on as you move between searches and pages.
 
 ## Permissions and privacy
 
-- **Userscript:** runs only on Amazon search results pages (`https://www.amazon.com/s*`, `https://amazon.com/s*`), not in frames. Grants: `GM_getValue` / `GM_setValue` (the script's private storage). No network access.
-- **Add-on:** `storage`, and content scripts on the same search-page URLs only (no broader host access).
+- **Userscript:** runs only on Amazon search results pages (`https://www.amazon.com/s*`) and product pages (`/dp/…`, `/gp/product/…`), on www.amazon.com and amazon.com, not in frames. Not on cart, checkout, account or order pages. Grants: `GM_getValue` / `GM_setValue` (the script's private storage). No network access.
+- **Add-on:** `storage`, and content scripts on the same search and product-page URLs only (no broader host access).
 - **Nothing is sent anywhere.** The code makes no network requests of any kind; everything is read from the page you're viewing.
-- **Stored locally, in the script's private storage:** whether it's on, your Sort by choice, the search term where you last picked "Featured", your brand votes, and learned brand data (product IDs, scores, review counts, and up to 20 search terms per brand, capped at 3,000 brands). "Reset learning" under Brands clears the learned data; removing the script clears everything. Nothing is written to amazon.com's own storage (a v0.1 leftover there is migrated and deleted on first run).
+- **Stored locally, in the script's private storage:** whether it's on, your Sort by choice, the search term where you last picked "Featured", the product ID of the search result you last clicked, your brand votes, learned brand data (product IDs, scores, review counts, and up to 20 search terms per brand, capped at 3,000 brands), and the ratings of the 300 most recently seen listings — their search-results reasons, the search term they came from, and any product-page check. "Reset learning" under Brands clears the learned data; removing the script clears everything. Nothing is written to amazon.com's own storage (a v0.1 leftover there is migrated and deleted on first run).
 - Listing text is only ever inserted as plain text (no `innerHTML`/`eval`), so a listing title can't inject code.
 - **Updates:** installed from the link above, Tampermonkey/Violentmonkey check this repository for newer versions and update automatically when `@version` goes up. Installed by pasting the script in by hand, it never updates on its own.
 
@@ -119,6 +135,7 @@ node test/score.test.js            # scoring vs. hand ratings
 node test/score.test.js --verbose  # every listing with its reasons
 node test/memory.test.js           # learning across several searches
 node test/live.test.js             # captured live pages: harmonica, window fans, baby strollers, shop vacs
+node test/product.test.js          # product-page refinement on 16 captured live product pages
 node test/memory-footprint.js      # the script's own memory use, and a leak check
 node test/ui.test.js               # full userscript in headless Chromium (needs Playwright)
 ```

@@ -8,7 +8,7 @@ const read = f => fs.readFileSync(path.join(root, f), "utf8");
 const manifest = JSON.parse(read("manifest.json"));
 
 // Userscript managers wrap the script in a function, so top-level `var`s wouldn't be global.
-const js = ["src/config.js", "src/brands.js", "src/bigrams.js", "src/scorer.js", "src/memory.js", "src/content.js"]
+const js = ["src/config.js", "src/brands.js", "src/bigrams.js", "src/scorer.js", "src/memory.js", "src/product.js", "src/content.js"]
   .map(f => `// ---- ${f} ----\n` + read(f))
   .join("\n;\n")
   .replace("var DSA_CONFIG =", "globalThis.DSA_CONFIG =")
@@ -22,6 +22,12 @@ const header = `// ==UserScript==
 // @description  ${manifest.description}
 // @match        https://www.amazon.com/s*
 // @match        https://amazon.com/s*
+// @match        https://www.amazon.com/dp/*
+// @match        https://www.amazon.com/*/dp/*
+// @match        https://www.amazon.com/gp/product/*
+// @match        https://amazon.com/dp/*
+// @match        https://amazon.com/*/dp/*
+// @match        https://amazon.com/gp/product/*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @run-at       document-idle

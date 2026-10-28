@@ -12,14 +12,21 @@
   const BIGRAMS = globalThis.DSA_BIGRAMS;
   const SCORER = globalThis.DSA_SCORER;
   const MEMORY = globalThis.DSA_MEMORY;
+  const PRODUCT = globalThis.DSA_PRODUCT;
   const CARD_SEL = 'div[data-component-type="s-search-result"]';
   const KEY_ENABLED = "dsaEnabled";
   const KEY_SORT = "dsaSort";                 // "trust" | "unit" | null (Amazon's own sort)
   const KEY_FEATURED_FOR = "dsaFeaturedFor";  // search where you picked Amazon's raw "Featured"
   const KEY_OLD_UNIT_SORT = "dsaUnitSort";    // v0.4.x
+  const KEY_LISTINGS = "dsaListings";
+  const KEY_LAST_CLICK = "dsaLastClick";      // the search result you last clicked through: {a: ASIN, at}         // per-ASIN: search-results estimate + product-page check
+  const LISTINGS_MAX = 300;                   // most recently seen listings kept
+  const CHECK_TTL = 30 * 864e5;               // product-page checks are reused for 30 days
   const KEY_MEMORY = "dsaMemory";
 
   let enabled = false;
+  let lastClick = null;     // { a: ASIN, at } — the search result last clicked through
+  let listings = {};        // ASIN → { s, t, r: [[pts, text, tag]], q, at, p?: { s, t, at, ch: [[pts, text]] } }
   let lastResults = null;   // last scoring, for refreshing the status line
   let lastPromoCount = 0;
   let sortChoice = null;    // "trust" | "unit" chosen in the Sort by menu (kept across searches), or null
@@ -254,7 +261,8 @@
     if (up) card.dataset.dsaUnit = up.label; else delete card.dataset.dsaUnit;
 
     const badge = el("details", { class: "dsa-badge" },
-      el("summary", null, `Trust ${result.tier}/5`, el("span", { class: "dsa-score" }, ` · ${result.score}`)));
+      el("summary", null, `Trust ${result.tier}/5`, el("span", { class: "dsa-score" }, ` · ${result.score}`),
+        result.checked ? el("span", { class: "dsa-checked", title: "Checked on its product page" }, " ✓") : null));
     // The pop-over (reasons, unit price, Trust/Block) is only built when the badge is first opened,
     // so a page of 50 closed badges costs a few dozen elements instead of ~2,000.
     let built = false;
@@ -293,6 +301,172 @@
     card.querySelectorAll(".dsa-badge").forEach(b => b.remove());
     card.querySelectorAll(".dsa-paint").forEach(t => t.classList.remove("dsa-paint"));
     if (card.classList.contains("dsa-paint")) card.classList.remove("dsa-paint");
+  }
+
+  // ---------- search-results estimates and product-page checks ----------
+
+  // Keep each listing's search-results estimate so its product page can show what changed.
+  function rememberEstimates(results) {
+    const now = Date.now();
+    const q = currentQuery();
+    for (const r of results.values()) {
+      if (!r.asin || r.listing.sponsored && listings[r.asin]) continue;
+      const prev = listings[r.asin] || {};
+      listings[r.asin] = Object.assign(prev, {
+        s: r.score, t: r.tier, q, at: now,
+        r: r.reasons.map(x => [x.pts, x.text, x.tag || ""])
+      });
+    }
+    pruneListings();
+    storeSet(KEY_LISTINGS, listings);
+  }
+
+  function pruneListings() {
+    const keys = Object.keys(listings);
+    if (keys.length <= LISTINGS_MAX) return;
+    keys.sort((a, b) => (listings[b].at || 0) - (listings[a].at || 0));
+    for (const k of keys.slice(LISTINGS_MAX)) delete listings[k];
+  }
+
+  // A listing checked on its product page carries that result back to the search results, as the
+  // difference it made (so your later votes and learning still apply on top).
+  function applyProductChecks(results) {
+    const now = Date.now();
+    for (const r of results.values()) {
+      const rec = listings[r.asin];
+      if (!rec || !rec.p || now - rec.p.at > CHECK_TTL) continue;
+      const delta = rec.p.s - rec.p.base;
+      r.reasons.push({ pts: delta, text: delta ? `Checked on its product page (${delta > 0 ? "+" : "−"}${Math.abs(delta)})` : "Checked on its product page (no change)", tag: "checked" });
+      r.score = Math.max(0, Math.min(100, r.score + delta));
+      const t = CFG.tiers;
+      r.tier = r.score >= t[0] ? 5 : r.score >= t[1] ? 4 : r.score >= t[2] ? 3 : r.score >= t[3] ? 2 : 1;
+      r.checked = true;
+      r.reasons.sort((a, b) => a.pts - b.pts);
+    }
+  }
+
+  // ---------- product pages ----------
+
+  function productPanel(refined, product) {
+    const c = colorsFor(refined.score);
+    const init = refined.initial;
+    // What the product page added up to, before the 0–100 limits. If the score was already pinned at
+    // 0 or 100, say so instead of claiming "no change".
+    const delta = refined.changes.reduce((a, x) => a + x.pts, 0);
+    const pinned = delta && refined.baseScore != null && refined.score === refined.baseScore ? (refined.score === 0 ? " — already at the bottom of the scale" : " — already at the top of the scale") : "";
+    const panel = el("div", { id: "dsa-product", class: "dsa-product" });
+    panel.style.setProperty("--dsa-bg", c.bg);
+    panel.style.setProperty("--dsa-edge", c.edge);
+    panel.style.setProperty("--dsa-ink", c.ink);
+
+    // The change in score from the estimate this page started from: the search-results rating, or,
+    // for a page opened directly, the rating from its title, stars and review count alone.
+    const from = refined.baseScore != null ? refined.baseScore : refined.score;
+    const moved = refined.score - from;
+    const cls = moved > 0 ? "dsa-up" : moved < 0 ? "dsa-down" : "dsa-same";
+    const deltaText = moved > 0 ? `▲${moved}` : moved < 0 ? `▼${Math.abs(moved)}` : "–";
+    const deltaTip = (init ? "Change from the search-results estimate" : "Change from the estimate from the title, stars and reviews alone") +
+      ` (${from} → ${refined.score})`;
+    const head = el("div", { class: "dsa-ph-head" },
+      el("span", { class: "dsa-ph-pill" }, `Trust ${refined.tier}/5`, el("span", { class: "dsa-score" }, ` · ${refined.score}`)),
+      el("span", { class: "dsa-ph-delta " + cls, title: deltaTip }, deltaText),
+      el("span", { class: "dsa-ph-title" }, "Disenshittify"));
+    let compare;
+    if (!init) {
+      compare = el("div", { class: "dsa-ph-compare" }, "Not in your recent search results — rated from this page.",
+        pinned ? el("span", { class: "dsa-muted" }, pinned) : null);
+    } else {
+      compare = el("div", { class: "dsa-ph-compare" },
+        refined.variantOf ? "Search results (another size/colour): " : "Search results: ", el("b", null, `${init.tier}/5 · ${init.score}`),
+        "  →  this page: ", el("b", null, `${refined.tier}/5 · ${refined.score}`),
+        pinned ? el("span", { class: "dsa-muted" }, pinned) : null,
+        init.tier !== refined.tier ? el("span", { class: "dsa-muted" }, `  (tier ${init.tier} → ${refined.tier})`) : null);
+    }
+
+    const details = el("details", { class: "dsa-ph-details" }, el("summary", null, "What the product page showed"));
+    const ch = el("ul", { class: "dsa-ph-list" });
+    for (const x of refined.changes) {
+      ch.append(el("li", { class: x.pts > 0 ? "dsa-good" : x.pts < 0 ? "dsa-bad" : "dsa-muted" },
+        `${x.pts > 0 ? "+" + x.pts : x.pts < 0 ? "−" + Math.abs(x.pts) : "±0"}  ${x.text}`));
+    }
+    if (!refined.changes.length) ch.append(el("li", { class: "dsa-muted" }, "Nothing here changes the estimate."));
+    const all = el("ul", { class: "dsa-ph-list" });
+    for (const x of refined.reasons) {
+      if (!x.pts) continue;
+      all.append(el("li", { class: x.pts > 0 ? "dsa-good" : "dsa-bad" }, `${x.pts > 0 ? "+" : "−"}${Math.abs(x.pts)}  ${x.text}`));
+    }
+    details.append(ch, el("div", { class: "dsa-phead" }, "All reasons"), all);
+
+    const key = product.brand ? SCORER.brandKey(product.brand) : null;
+    if (key) {
+      const current = memory.votes[key];
+      details.append(el("div", { class: "dsa-brandrow" },
+        el("span", { class: "dsa-brandname" }, product.brand),
+        button(current === "trust" ? "Trusted ✓" : "Trust", current === "trust" ? "dsa-on dsa-trust" : "dsa-trust",
+          () => { memory = MEMORY.setVote(memory, key, product.brand, current === "trust" ? null : "trust"); refreshLearned(); storeSet(KEY_MEMORY, memory); runProductPage(true); }),
+        button(current === "block" ? "Blocked ✓" : "Block", current === "block" ? "dsa-on dsa-block" : "dsa-block",
+          () => { memory = MEMORY.setVote(memory, key, product.brand, current === "block" ? null : "block"); refreshLearned(); storeSet(KEY_MEMORY, memory); runProductPage(true); })));
+    }
+    panel.append(head, compare, details);
+    return panel;
+  }
+
+  // Which search-results estimate this page belongs to. The page's own ASIN often isn't the one you
+  // clicked: Amazon opens the size or colour you picked last time, or you switch variants here. So also
+  // try the page's other variants (the size/colour swatches) and the result you last clicked.
+  function findInitial(asin) {
+    const tries = [asin];
+    for (const e of document.querySelectorAll('[id*="twister" i] [data-asin], [id*="twister" i] [data-defaultasin], [id*="twister" i] [data-csa-c-item-id]')) {
+      const a = e.getAttribute("data-asin") || e.getAttribute("data-defaultasin") || e.getAttribute("data-csa-c-item-id") || "";
+      if (/^[A-Z0-9]{10}$/.test(a) && !tries.includes(a)) tries.push(a);
+    }
+    const fromSearch = /\/s(\?|$)|[?&]k=/.test((() => { try { return new URL(document.referrer).pathname + new URL(document.referrer).search; } catch (e) { return ""; } })());
+    if (lastClick && lastClick.a && Date.now() - lastClick.at < 30 * 60e3 && (fromSearch || tries.includes(lastClick.a)) && !tries.includes(lastClick.a)) tries.push(lastClick.a);
+    // A record for this exact ASIN wins; otherwise the most recently seen variant.
+    let best = null;
+    for (const a of tries) {
+      const rec = listings[a];
+      if (!rec || !rec.r) continue;
+      if (a === asin) return { asin: a, rec };
+      if (!best || rec.at > best.rec.at) best = { asin: a, rec };
+    }
+    return best;
+  }
+
+  function runProductPage(reopen) {
+    const old = document.getElementById("dsa-product");
+    if (!enabled) { if (old) old.remove(); return; }
+    const anchor = document.querySelector("#titleSection, #title_feature_div, #title");
+    if (!anchor || !document.querySelector("#productTitle")) return;
+    if (PRODUCT.isMediaPage(document)) { if (old) old.remove(); return; }   // books, films, TV, music, games
+    try {
+      const product = PRODUCT.extractProduct(document);
+      const urlAsin = (/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/.exec(location.pathname) || [])[1];
+      if (!product.asin) product.asin = urlAsin;
+      const found = findInitial(product.asin);
+      const rec = found && found.rec;
+      const initial = rec ? { score: rec.s, tier: rec.t, reasons: rec.r.map(([pts, text, tag]) => ({ pts, text, tag: tag || undefined })) } : null;
+      const refined = PRODUCT.refineScore(initial, product, scoringConfig(), BIGRAMS, SCORER);
+      refined.variantOf = found && found.asin !== product.asin ? found.asin : null;
+      // Remember the check for the search results, under this ASIN and the one the estimate came from.
+      const check = { s: refined.score, t: refined.tier, base: refined.baseScore != null ? refined.baseScore : refined.score, at: Date.now(),
+                      ch: refined.changes.map(x => [x.pts, x.text]) };
+      listings[product.asin] = Object.assign(listings[product.asin] || { q: rec ? rec.q : "", at: Date.now() }, { p: check });
+      if (found && found.asin !== product.asin) listings[found.asin].p = check;
+      pruneListings();
+      storeSet(KEY_LISTINGS, listings);
+
+      const panel = productPanel(refined, product);
+      if (reopen) panel.querySelector(".dsa-ph-details").open = true;
+      if (old) old.replaceWith(panel); else anchor.insertAdjacentElement("afterend", panel);
+    } catch (e) {
+      // Never fail silently: say so on the page, with the error, so it can be reported.
+      console.error("[Disenshittify] product page:", e);
+      const panel = el("div", { id: "dsa-product", class: "dsa-product dsa-product-error" },
+        el("div", { class: "dsa-ph-head" }, el("span", { class: "dsa-ph-title" }, "Disenshittify")),
+        el("div", { class: "dsa-ph-compare" }, "Couldn't rate this page: " + (e && e.message || e)));
+      if (old) old.replaceWith(panel); else anchor.insertAdjacentElement("afterend", panel);
+    }
   }
 
   // ---------- promos and ad blocks ----------
@@ -355,6 +529,17 @@
 
   function cards() { return [...document.querySelectorAll(CARD_SEL)].filter(c => c.dataset.asin); }
 
+  // Books, films, TV, music and games aren't rated. A search where nearly everything (80%+) is
+  // media gets no Disenshittify at all; on mixed pages the media results are just left alone.
+  function isMedia(card) {
+    if (card.dataset.dsaMedia === undefined) card.dataset.dsaMedia = PRODUCT.isMediaCard(card) ? "1" : "";
+    return card.dataset.dsaMedia === "1";
+  }
+  function isMediaSearch() {
+    const list = cards();
+    return list.length > 0 && list.filter(isMedia).length >= list.length * 0.8;
+  }
+
   function apply() {
     const list = cards();
     if (!list.length) return;
@@ -370,8 +555,12 @@
         snapshot = { order: new Map([...parents].map(p => [p, [...p.children]])), cards: new Set(list) };
       }
 
-      const raws = list.map(scrapeCard);
+      const media = list.filter(isMedia);
+      const rated = list.filter(c => !isMedia(c));
+      const raws = rated.map(scrapeCard);
       const results = SCORER.scorePage(raws, scoringConfig(), BIGRAMS);
+      rememberEstimates(results);
+      applyProductChecks(results);
 
       // Learn from this page (uses brand-free evidence, so it can't reinforce itself).
       memory = MEMORY.recordPage(memory, results, currentQuery(), CFG.learning);
@@ -381,7 +570,7 @@
       // Decorate every card, and hide repeat placements of the same product
       // (keeping the organic copy over the sponsored one).
       const keep = new Map();
-      list.forEach((card, i) => {
+      rated.forEach((card, i) => {
         const r = results.get(i);
         decorate(card, r);
         const prev = keep.get(r.asin);
@@ -399,9 +588,18 @@
       restoreOrder();
       const mode = currentMode();
       if (mode !== "amazon") {
-        const order = mode === "unit"
-          ? unitOrder(list, raws, results)
-          : list.map((card, i) => ({ card, i, score: results.get(i).score })).sort((a, b) => b.score - a.score || a.i - b.i);
+        const sorted = mode === "unit"
+          ? unitOrder(rated, raws, results)
+          : rated.map((card, i) => ({ card, i, score: results.get(i).score })).sort((a, b) => b.score - a.score || a.i - b.i);
+        // Unrated media (games, books, films) keep the places Amazon gave them — a search for a game
+        // keeps the game on top; the rated listings are sorted around them.
+        const order = [];
+        let next = 0;
+        for (const card of cards()) {
+          if (media.includes(card)) order.push({ card });
+          else if (next < sorted.length) order.push(sorted[next++]);
+        }
+        while (next < sorted.length) order.push(sorted[next++]);
         const firstResult = [...slot.children].find(node => node.matches(CARD_SEL));
         const anchor = document.createComment("dsa-sorted");
         slot.insertBefore(anchor, firstResult);
@@ -627,6 +825,8 @@
       const tiers = [0, 0, 0, 0, 0, 0];
       for (const c of visible) tiers[+c.dataset.dsaTier]++;
       const extras = [];
+      const media = cards().filter(c => c.dataset.dsaMedia === "1").length;
+      if (media) extras.push(`${media} book${media === 1 ? "" : "s"}/media not rated`);
       if (hidden) extras.push(`${hidden} promo${hidden === 1 ? "" : "s"} removed`);
       if (mode === "amazon") extras.push("Amazon's order");
       if (mode === "unit") extras.push("ordered by $/count");
@@ -734,7 +934,7 @@
 
   function placeToggle() {
     if (document.getElementById("dsa-toggle")) return;
-    if (!document.querySelector(CARD_SEL)) return;
+    if (!document.querySelector(CARD_SEL) || isMediaSearch()) return;
     const toggle = buildToggle();
     const sidebar = document.querySelector("#s-refinements, #s-filters-content");
     if (sidebar) {
@@ -755,16 +955,27 @@
     if (applying) return;
     clearTimeout(pending);
     pending = setTimeout(() => {
+      if (isMediaSearch()) { leaveMediaSearch(); return; }
       placeToggle();
       const input = document.querySelector("#dsa-toggle .dsa-main");
       if (input) input.checked = enabled;
       if (enabled) installSortOption();
-      if (enabled && cards().some(c => !c.dataset.dsaScored)) apply();
+      if (enabled && cards().some(c => !c.dataset.dsaScored && !isMedia(c))) apply();
       else if (enabled && CFG.hideClutter !== false && removeClutter() !== lastPromoCount) {
         lastPromoCount = promosRemoved;
         updateStatus(lastResults, currentMode(), promosRemoved);
       }
     }, 350);
+  }
+
+  // A search that turned into a media search (Amazon swapped the results in place): undo everything.
+  function leaveMediaSearch() {
+    const t = document.getElementById("dsa-toggle");
+    if (!t && !lastResults) return;
+    if (lastResults) restore();
+    removeSortOption();
+    if (t) t.remove();
+    lastResults = null;
   }
 
   // Clicking anywhere else closes an open badge.
@@ -773,6 +984,19 @@
       document.querySelectorAll(".dsa-badge[open]").forEach(b => { b.open = false; });
     }
   });
+
+  // Remember which result you clicked through (left or middle click), so its product page can find
+  // the search-results estimate even when Amazon opens another size or colour.
+  const noteClick = e => {
+    if (!enabled || PRODUCT.isProductPage(location)) return;
+    const a = e.target.closest && e.target.closest("a[href]");
+    const card = a && a.closest(CARD_SEL);
+    if (!card || !card.dataset.asin || a.closest(".dsa-badge")) return;
+    lastClick = { a: card.dataset.asin, at: Date.now() };
+    storeSet(KEY_LAST_CLICK, lastClick);
+  };
+  document.addEventListener("click", noteClick, true);
+  document.addEventListener("auxclick", noteClick, true);
 
   console.info("[Disenshittify] running on this page");
   // v0.1 kept the on/off flag in amazon.com's own localStorage, where Amazon's scripts can see it.
@@ -793,14 +1017,32 @@
   }
 
   migrateOldSettings().then(() => Promise.all([storeGet(KEY_ENABLED, false), storeGet(KEY_MEMORY, null),
-    storeGet(KEY_SORT, null), storeGet(KEY_FEATURED_FOR, "")])).then(([on, mem, choice, featured]) => {
+    storeGet(KEY_SORT, null), storeGet(KEY_FEATURED_FOR, ""), storeGet(KEY_LISTINGS, {}), storeGet(KEY_LAST_CLICK, null)])).then(([on, mem, choice, featured, seen, clicked]) => {
+    lastClick = clicked && typeof clicked === "object" ? clicked : null;
     enabled = !!on;
     sortChoice = choice === "trust" || choice === "unit" ? choice : null;
     featuredFor = typeof featured === "string" ? featured : "";
     memory = MEMORY.sanitize(mem);
+    listings = seen && typeof seen === "object" ? seen : {};
     refreshLearned();
-    placeToggle();
-    if (enabled) { installSortOption(); apply(); }
+    if (PRODUCT.isProductPage(location)) {
+      // Picking another colour or size swaps the product in place (new ASIN in the address, no reload).
+      let lastPath = location.pathname;
+      let timer = null;
+      new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          const panelGone = enabled && !document.getElementById("dsa-product");
+          if (location.pathname !== lastPath || panelGone) { lastPath = location.pathname; runProductPage(false); }
+        }, 600);
+      }).observe(document.body, { childList: true, subtree: true });
+      runProductPage(false);
+      return;
+    }
+    if (!isMediaSearch()) {
+      placeToggle();
+      if (enabled) { installSortOption(); apply(); }
+    }
     new MutationObserver(onMutations).observe(document.body, { childList: true, subtree: true });
   });
 })();

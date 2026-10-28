@@ -20,7 +20,8 @@ var DSA_BRANDS = {
     "Fox Run", "Bellemain", "Silpat", "Ateco", "Paderno", "Cuisipro", "Microplane",
     "Joseph Joseph", "Great Jones", "Caraway", "GreenPan", "Our Place", "Misen", "Zyliss",
     "Brod & Taylor", "King Arthur", "Sassafras", "Ooni", "Baking Steel", "Doughmakers",
-    "Kaiser Bakeware", "Birkmann", "Städter", "Stadter", "RBV Birkmann", "Zenker", "Dr. Oetker", "Lékué", "Lekue", "Rösle", "Rosle", "Tramontina",
+    "Kaiser Bakeware", "Birkmann", "Reynolds", "Reynolds Wrap", "Hefty", "Saran", "Kirkland Signature", "Hormel",
+    "Vitafusion", "Olly", "SmartyPants", "Florsheim", "Allen Edmonds", "Woodlore", "Rockport", "Levi's", "Dockers", "Städter", "Stadter", "RBV Birkmann", "Zenker", "Dr. Oetker", "Lékué", "Lekue", "Rösle", "Rosle", "Tramontina",
     "Cuisinox", "Demeyere", "Viking Culinary", "Cook N Home", "Prepworks", "Chef'n", "Ninja", "Instant Pot", "Instant Brands", "Crock-Pot", "Hamilton Beach",
     "Proctor Silex", "Breville", "De'Longhi", "DeLonghi", "Nespresso", "Keurig", "Mr. Coffee",
     "Bodum", "Hario", "Chemex", "Baratza", "Bonavita", "Zojirushi", "Vitamix", "Blendtec", "NutriBullet", "Magic Bullet", "Oster", "Sunbeam", "Black+Decker",
@@ -125,7 +126,9 @@ var DSA_BRANDS = {
     "Maybelline", "e.l.f.", "NYX", "Colgate", "Crest", "Sensodyne", "Listerine",
     "Philips Norelco", "Schick", "Bic", "Tylenol", "Advil", "Motrin",
     "Aleve", "Bayer", "Benadryl", "Zyrtec", "Claritin", "Allegra", "Flonase", "Mucinex",
-    "Vicks", "Nature Made", "Nature's Bounty", "Centrum", "One A Day", "Garden of Life",
+    "Vicks", "Nature Made", "Nature's Bounty", "Centrum", "One A Day", "Garden of Life", "Pure Encapsulations", "Thorne", "Solgar", "Life Extension", "Doctor's Best",
+    "Jarrow Formulas", "Nordic Naturals", "Kirkland Signature", "Nutricost", "NatureWise", "Natrol",
+    "Rainbow Light", "MegaFood", "New Chapter", "Swanson", "Bluebonnet", "Country Life", "Klaire Labs",
     "NOW Foods", "NOW Supplements", "Optimum Nutrition", "Vital Proteins", "Orgain",
     "Omron", "Braun ThermoScan", "iHealth", "Band-Aid", "Nexcare", "Curad",
     "Johnson & Johnson", "Kleenex", "Charmin", "Cottonelle", "Huggies", "Pampers",
@@ -188,7 +191,8 @@ var DSA_BRANDS = {
     "Lifetime", "Method", "Command", "Halo", "Hatch", "Fellow", "Dash", "Away", "Branch", "Tile",
     "Polar", "Lucid", "Pilot", "Zebra", "Expo", "Orbit", "Cobra", "Smith", "Costa", "Ping",
     "Nomad", "Rivet", "Uplift", "Beats", "Lee", "Hart", "Sharp", "Klein", "Gorilla", "Scotch",
-    "Mothers", "Optima", "Champion", "Converse", "Coach", "Glad", "Dove", "Bounty", "Tide"
+    "Mothers", "Optima", "Champion", "Converse", "Coach", "Glad", "Dove", "Bounty", "Tide",
+    "Dawn", "Cascade", "Scott", "Dixie", "Solo", "Kiwi"
   ],
 
   // Throwaway / nonsense names confirmed by hand.

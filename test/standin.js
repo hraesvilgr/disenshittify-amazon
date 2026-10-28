@@ -95,4 +95,29 @@ const GM_SHIM = `
   window.GM_getValue = (k, d) => { const v = localStorage.getItem("gm:" + k); return v == null ? d : JSON.parse(v); };
   window.GM_setValue = (k, v) => localStorage.setItem("gm:" + k, JSON.stringify(v));`;
 
-module.exports = { page, GM_SHIM, fixture };
+// Stand-in product page with Amazon's structure, from a captured product record.
+function productPage(pr) {
+  const hist = pr.histogram ? Object.entries(pr.histogram).map(([star, pct]) =>
+    `<li><a aria-label="${pct} percent of reviews have ${star} stars" href="#">${star} star ${pct}%</a></li>`).join("") : "";
+  const rows = [["Brand Name", pr.brand], ["Manufacturer", pr.manufacturer], ["Date First Available", pr.dateFirstAvailable], ["ASIN", pr.asin]]
+    .filter(r => r[1]).map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join("");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Amazon.com: ${esc(pr.title)}</title></head><body>
+<div id="dp" class="${pr.dpClass || "kitchen en_US"}"><div id="centerCol">
+  <div id="titleSection"><h1 id="title"><span id="productTitle">${esc(pr.title)}</span></h1></div>
+  <a id="bylineInfo" href="${pr.brandStore ? "/stores/x/page/1" : "/" + esc(pr.brand || "x") + "/b/"}">${esc(pr.bylineText || "")}</a>
+  <div id="averageCustomerReviews"><span id="acrPopover" title="${pr.rating != null ? pr.rating + " out of 5 stars" : ""}"></span>
+    <span id="acrCustomerReviewText">${pr.reviewCount != null ? "(" + pr.reviewCount.toLocaleString("en-US") + ")" : ""}</span></div>
+  <div id="feature-bullets"><ul>${(pr.bullets || []).map(b => `<li><span class="a-list-item">${esc(b)}</span></li>`).join("")}</ul></div>
+  ${pr.frequentlyReturned ? "<div>Frequently returned item</div>" : ""}
+</div>
+<div id="buybox">
+  <div offer-display-feature-name="desktop-fulfiller-info"><span class="offer-display-feature-text-message">${esc(pr.shipsFrom || "")}</span></div>
+  <div offer-display-feature-name="desktop-merchant-info"><span class="offer-display-feature-text-message">${esc(pr.soldBy || "")}</span></div>
+</div>
+${pr.variants ? `<div id="twister_feature_div"><ul>${pr.variants.map(a => `<li data-defaultasin="${a}">variant</li>`).join("")}</ul></div>` : ""}
+<ul id="histogramTable">${hist}</ul>
+<table id="productDetails_detailBullets_sections1">${rows}</table>
+</div></body></html>`;
+}
+
+module.exports = { page, GM_SHIM, fixture, productPage };

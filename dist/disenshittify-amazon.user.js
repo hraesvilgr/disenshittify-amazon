@@ -1,10 +1,16 @@
 // ==UserScript==
 // @name         Disenshittify Amazon
 // @namespace    disenshittify-amazon
-// @version      0.5.1
+// @version      0.7.2
 // @description  Rates Amazon search results by trustworthiness, tints them green to red, and sorts the junk to the bottom.
 // @match        https://www.amazon.com/s*
 // @match        https://amazon.com/s*
+// @match        https://www.amazon.com/dp/*
+// @match        https://www.amazon.com/*/dp/*
+// @match        https://www.amazon.com/gp/product/*
+// @match        https://amazon.com/dp/*
+// @match        https://amazon.com/*/dp/*
+// @match        https://amazon.com/gp/product/*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @run-at       document-idle
@@ -14,7 +20,7 @@
 (function () {
   const style = document.createElement("style");
   style.id = "dsa-styles";
-  style.textContent = "/* Disenshittify Amazon \u2014 injected styles. Everything is prefixed dsa- to stay out of Amazon's way. */\n\n/* ---------- toggle ---------- */\n#dsa-toggle {\n  box-sizing: border-box;\n  margin: 0 0 14px;\n  padding: 10px 12px;\n  border: 2px solid #8bc34a;\n  border-radius: 10px;\n  background: #fbfdf7;\n  font-family: \"Amazon Ember\", Arial, sans-serif;\n  color: #0f1111;\n}\n#dsa-toggle.dsa-inline { max-width: 360px; margin: 8px 0 12px; }\n\n.dsa-switch {\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  cursor: pointer;\n  user-select: none;\n}\n.dsa-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }\n.dsa-track {\n  position: relative;\n  flex: none;\n  width: 40px;\n  height: 22px;\n  border-radius: 11px;\n  background: #b9bdbd;\n  transition: background 0.15s;\n}\n.dsa-thumb {\n  position: absolute;\n  top: 3px;\n  left: 3px;\n  width: 16px;\n  height: 16px;\n  border-radius: 50%;\n  background: #fff;\n  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);\n  transition: transform 0.15s;\n}\n.dsa-switch input:checked + .dsa-track { background: #2e7d32; }\n.dsa-switch input:checked + .dsa-track .dsa-thumb { transform: translateX(18px); }\n.dsa-switch input:focus-visible + .dsa-track { outline: 2px solid #007185; outline-offset: 2px; }\n.dsa-label { font-size: 16px; font-weight: 700; }\n.dsa-unit { margin-bottom: 6px; }\n\n.dsa-status { margin: 6px 0 0 50px; font-size: 12px; color: #565959; }\n.dsa-legend { margin: 8px 0 0 50px; }\n.dsa-legend span {\n  display: block;\n  height: 6px;\n  border-radius: 3px;\n  background: linear-gradient(90deg, hsl(120 70% 40%), hsl(60 70% 45%), hsl(0 70% 45%));\n}\n\n/* ---------- rated cards ---------- */\n.dsa-paint {\n  background: var(--dsa-bg) !important;\n  box-shadow: inset 6px 0 0 var(--dsa-edge) !important;\n  border-radius: 8px;\n}\n/* Amazon paints white boxes inside the card; let the tint show through. */\n.dsa-paint .a-section,\n.dsa-paint .s-card-border,\n.dsa-paint .puis-card-border,\n.dsa-paint .s-card-container,\n.dsa-paint .puis-padding-left-small {\n  background: transparent !important;\n}\n/* Keep product photos true to colour: a plain white box behind the image, no blending. */\n.dsa-paint .s-product-image-container {\n  background: #fff !important;\n  border-radius: 6px;\n}\n.dsa-paint .s-image { mix-blend-mode: normal !important; }\n\n.dsa-dupe { display: none !important; }\n\n/* ---------- trust badge: a small pill over the card's top-right corner ---------- */\n.dsa-rated { position: relative; }\n.dsa-rated:has(.dsa-badge[open]) { z-index: 60; }\n.dsa-wide [data-cy=\"title-recipe\"] { padding-right: 130px; }       /* open popover sits above neighbouring cards */\n.dsa-badge {\n  position: absolute;\n  top: 6px;\n  right: 6px;\n  z-index: 30;\n  font: 12px/1.35 \"Amazon Ember\", Arial, sans-serif;\n  color: var(--dsa-ink);\n  text-align: left;\n}\n.dsa-badge > summary {\n  display: inline-block;\n  padding: 2px 8px;\n  border-radius: 11px;\n  background: var(--dsa-edge);\n  color: #fff;\n  font-weight: 700;\n  white-space: nowrap;\n  cursor: pointer;\n  list-style: none;\n  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);\n}\n.dsa-badge > summary::-webkit-details-marker { display: none; }\n.dsa-badge > summary::marker { content: \"\"; }\n.dsa-badge > summary::after { content: \" \\25BE\"; font-weight: 400; }\n.dsa-badge[open] > summary::after { content: \" \\25B4\"; }\n.dsa-badge .dsa-score { font-weight: 400; opacity: 0.85; }\n.dsa-badge li { margin: 1px 0; white-space: pre-wrap; padding-left: 2.2em; text-indent: -2.2em; }\n.dsa-badge li.dsa-good { color: #1e6b25; }\n.dsa-badge li.dsa-bad { color: #9b1c1c; }\n\n/* ---------- brand buttons (badge + manager) ---------- */\n.dsa-badge-body {\n  position: absolute;\n  top: calc(100% + 4px);\n  right: 0;\n  width: 280px;\n  max-width: 80vw;\n  max-height: 60vh;\n  overflow-y: auto;\n  padding: 10px 12px;\n  border: 1px solid var(--dsa-edge);\n  border-radius: 8px;\n  background: #fff;\n  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);\n}\n\n.dsa-badge .dsa-badge-body ul { margin: 0; padding: 0; list-style: none; background: none; }\n.dsa-brandrow {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: center;\n  gap: 6px;\n  margin-top: 8px;\n  padding-top: 8px;\n  border-top: 1px solid rgba(0, 0, 0, 0.12);\n}\n.dsa-brandname { font-weight: 700; color: #0f1111; margin-right: auto; }\n.dsa-muted { color: #565959; font-size: 12px; }\n.dsa-btn {\n  font: 12px/1 \"Amazon Ember\", Arial, sans-serif;\n  padding: 5px 9px;\n  border: 1px solid #b9bdbd;\n  border-radius: 12px;\n  background: #fff;\n  color: #0f1111;\n  cursor: pointer;\n}\n.dsa-btn:hover { background: #f3f3f3; }\n.dsa-btn.dsa-trust { border-color: #2e7d32; color: #1e6b25; }\n.dsa-btn.dsa-block { border-color: #b71c1c; color: #9b1c1c; }\n.dsa-btn.dsa-on.dsa-trust { background: #2e7d32; color: #fff; }\n.dsa-btn.dsa-on.dsa-block { background: #b71c1c; color: #fff; }\n.dsa-btn.dsa-x { padding: 3px 8px; font-size: 14px; }\n.dsa-btn.dsa-reset { margin-left: auto; }\n\n.dsa-manage {\n  display: block;\n  margin: 8px 0 0 50px;\n  padding: 0;\n  border: 0;\n  background: none;\n  color: #007185;\n  font: 12px \"Amazon Ember\", Arial, sans-serif;\n  cursor: pointer;\n  text-align: left;\n}\n.dsa-manage:hover { text-decoration: underline; }\n.dsa-panel {\n  margin-top: 8px;\n  max-height: 360px;\n  overflow-y: auto;\n  font: 12px/1.4 \"Amazon Ember\", Arial, sans-serif;\n}\n.dsa-panel[hidden] { display: none; }\n.dsa-phead { margin: 8px 0 4px; font-weight: 700; font-size: 12px; }\n.dsa-plist { margin: 0; padding: 0; list-style: none; }\n.dsa-pitem {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: center;\n  gap: 4px 6px;\n  padding: 4px 0;\n  border-bottom: 1px solid #eee;\n}\n.dsa-pname { font-weight: 700; margin-right: auto; word-break: break-word; }\n.dsa-ptag { font-size: 11px; padding: 1px 6px; border-radius: 8px; color: #fff; }\n.dsa-ptag.dsa-trust { background: #2e7d32; }\n.dsa-ptag.dsa-block { background: #b71c1c; }\n.dsa-pactions { display: flex; gap: 4px; width: 100%; justify-content: flex-end; }\n.dsa-pitem .dsa-btn { padding: 3px 7px; font-size: 11px; }\n.dsa-pfoot { display: flex; align-items: center; gap: 6px; margin-top: 10px; }\n\n/* ---------- promos / ad blocks between results ---------- */\n.dsa-clutter,\n.dsa-stray-head { display: none !important; }\n";
+  style.textContent = "/* Disenshittify Amazon \u2014 injected styles. Everything is prefixed dsa- to stay out of Amazon's way. */\n\n/* ---------- toggle ---------- */\n#dsa-toggle {\n  box-sizing: border-box;\n  margin: 0 0 14px;\n  padding: 10px 12px;\n  border: 2px solid #8bc34a;\n  border-radius: 10px;\n  background: #fbfdf7;\n  font-family: \"Amazon Ember\", Arial, sans-serif;\n  color: #0f1111;\n}\n#dsa-toggle.dsa-inline { max-width: 360px; margin: 8px 0 12px; }\n\n.dsa-switch {\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  cursor: pointer;\n  user-select: none;\n}\n.dsa-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }\n.dsa-track {\n  position: relative;\n  flex: none;\n  width: 40px;\n  height: 22px;\n  border-radius: 11px;\n  background: #b9bdbd;\n  transition: background 0.15s;\n}\n.dsa-thumb {\n  position: absolute;\n  top: 3px;\n  left: 3px;\n  width: 16px;\n  height: 16px;\n  border-radius: 50%;\n  background: #fff;\n  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);\n  transition: transform 0.15s;\n}\n.dsa-switch input:checked + .dsa-track { background: #2e7d32; }\n.dsa-switch input:checked + .dsa-track .dsa-thumb { transform: translateX(18px); }\n.dsa-switch input:focus-visible + .dsa-track { outline: 2px solid #007185; outline-offset: 2px; }\n.dsa-label { font-size: 16px; font-weight: 700; }\n.dsa-unit { margin-bottom: 6px; }\n\n.dsa-status { margin: 6px 0 0 50px; font-size: 12px; color: #565959; }\n.dsa-legend { margin: 8px 0 0 50px; }\n.dsa-legend span {\n  display: block;\n  height: 6px;\n  border-radius: 3px;\n  background: linear-gradient(90deg, hsl(120 70% 40%), hsl(60 70% 45%), hsl(0 70% 45%));\n}\n\n/* ---------- rated cards ---------- */\n.dsa-paint {\n  background: var(--dsa-bg) !important;\n  box-shadow: inset 6px 0 0 var(--dsa-edge) !important;\n  border-radius: 8px;\n}\n/* Amazon paints white boxes inside the card; let the tint show through. */\n.dsa-paint .a-section,\n.dsa-paint .s-card-border,\n.dsa-paint .puis-card-border,\n.dsa-paint .s-card-container,\n.dsa-paint .puis-padding-left-small {\n  background: transparent !important;\n}\n/* Keep product photos true to colour: a plain white box behind the image, no blending. */\n.dsa-paint .s-product-image-container {\n  background: #fff !important;\n  border-radius: 6px;\n}\n.dsa-paint .s-image { mix-blend-mode: normal !important; }\n\n.dsa-dupe { display: none !important; }\n\n/* ---------- trust badge: a small pill over the card's top-right corner ---------- */\n.dsa-rated { position: relative; }\n.dsa-rated:has(.dsa-badge[open]) { z-index: 60; }\n.dsa-wide [data-cy=\"title-recipe\"] { padding-right: 130px; }       /* open popover sits above neighbouring cards */\n.dsa-badge {\n  position: absolute;\n  top: 6px;\n  right: 6px;\n  z-index: 30;\n  font: 12px/1.35 \"Amazon Ember\", Arial, sans-serif;\n  color: var(--dsa-ink);\n  text-align: left;\n}\n.dsa-badge > summary {\n  display: inline-block;\n  padding: 2px 8px;\n  border-radius: 11px;\n  background: var(--dsa-edge);\n  color: #fff;\n  font-weight: 700;\n  white-space: nowrap;\n  cursor: pointer;\n  list-style: none;\n  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);\n}\n.dsa-badge > summary::-webkit-details-marker { display: none; }\n.dsa-badge > summary::marker { content: \"\"; }\n.dsa-badge > summary::after { content: \" \\25BE\"; font-weight: 400; }\n.dsa-badge[open] > summary::after { content: \" \\25B4\"; }\n.dsa-badge .dsa-score { font-weight: 400; opacity: 0.85; }\n.dsa-badge li { margin: 1px 0; white-space: pre-wrap; padding-left: 2.2em; text-indent: -2.2em; }\n.dsa-badge li.dsa-good { color: #1e6b25; }\n.dsa-badge li.dsa-bad { color: #9b1c1c; }\n\n/* ---------- brand buttons (badge + manager) ---------- */\n.dsa-badge-body {\n  position: absolute;\n  top: calc(100% + 4px);\n  right: 0;\n  width: 280px;\n  max-width: 80vw;\n  max-height: 60vh;\n  overflow-y: auto;\n  padding: 10px 12px;\n  border: 1px solid var(--dsa-edge);\n  border-radius: 8px;\n  background: #fff;\n  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);\n}\n\n.dsa-badge .dsa-badge-body ul { margin: 0; padding: 0; list-style: none; background: none; }\n.dsa-brandrow {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: center;\n  gap: 6px;\n  margin-top: 8px;\n  padding-top: 8px;\n  border-top: 1px solid rgba(0, 0, 0, 0.12);\n}\n.dsa-brandname { font-weight: 700; color: #0f1111; margin-right: auto; }\n.dsa-muted { color: #565959; font-size: 12px; }\n.dsa-btn {\n  font: 12px/1 \"Amazon Ember\", Arial, sans-serif;\n  padding: 5px 9px;\n  border: 1px solid #b9bdbd;\n  border-radius: 12px;\n  background: #fff;\n  color: #0f1111;\n  cursor: pointer;\n}\n.dsa-btn:hover { background: #f3f3f3; }\n.dsa-btn.dsa-trust { border-color: #2e7d32; color: #1e6b25; }\n.dsa-btn.dsa-block { border-color: #b71c1c; color: #9b1c1c; }\n.dsa-btn.dsa-on.dsa-trust { background: #2e7d32; color: #fff; }\n.dsa-btn.dsa-on.dsa-block { background: #b71c1c; color: #fff; }\n.dsa-btn.dsa-x { padding: 3px 8px; font-size: 14px; }\n.dsa-btn.dsa-reset { margin-left: auto; }\n\n.dsa-manage {\n  display: block;\n  margin: 8px 0 0 50px;\n  padding: 0;\n  border: 0;\n  background: none;\n  color: #007185;\n  font: 12px \"Amazon Ember\", Arial, sans-serif;\n  cursor: pointer;\n  text-align: left;\n}\n.dsa-manage:hover { text-decoration: underline; }\n.dsa-panel {\n  margin-top: 8px;\n  max-height: 360px;\n  overflow-y: auto;\n  font: 12px/1.4 \"Amazon Ember\", Arial, sans-serif;\n}\n.dsa-panel[hidden] { display: none; }\n.dsa-phead { margin: 8px 0 4px; font-weight: 700; font-size: 12px; }\n.dsa-plist { margin: 0; padding: 0; list-style: none; }\n.dsa-pitem {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: center;\n  gap: 4px 6px;\n  padding: 4px 0;\n  border-bottom: 1px solid #eee;\n}\n.dsa-pname { font-weight: 700; margin-right: auto; word-break: break-word; }\n.dsa-ptag { font-size: 11px; padding: 1px 6px; border-radius: 8px; color: #fff; }\n.dsa-ptag.dsa-trust { background: #2e7d32; }\n.dsa-ptag.dsa-block { background: #b71c1c; }\n.dsa-pactions { display: flex; gap: 4px; width: 100%; justify-content: flex-end; }\n.dsa-pitem .dsa-btn { padding: 3px 7px; font-size: 11px; }\n.dsa-pfoot { display: flex; align-items: center; gap: 6px; margin-top: 10px; }\n\n/* ---------- promos / ad blocks between results ---------- */\n.dsa-clutter,\n.dsa-stray-head { display: none !important; }\n\n/* ---------- product page panel ---------- */\n.dsa-checked { font-weight: 700; }\n.dsa-product {\n  margin: 8px 0 10px;\n  padding: 8px 12px 8px 14px;\n  border-radius: 8px;\n  background: var(--dsa-bg);\n  box-shadow: inset 6px 0 0 var(--dsa-edge);\n  font: 13px/1.4 \"Amazon Ember\", Arial, sans-serif;\n  color: #0f1111;\n}\n.dsa-ph-head { display: flex; align-items: center; gap: 8px; }\n.dsa-ph-pill {\n  padding: 2px 9px;\n  border-radius: 11px;\n  background: var(--dsa-edge);\n  color: #fff;\n  font-weight: 700;\n}\n.dsa-ph-title { font-weight: 700; color: var(--dsa-ink); margin-left: auto; }\n.dsa-ph-delta { font-weight: 700; font-size: 15px; cursor: help; }\n.dsa-ph-delta.dsa-up { color: #1e6b25; }\n.dsa-ph-delta.dsa-down { color: #9b1c1c; }\n.dsa-ph-delta.dsa-same { color: #565959; }\n.dsa-ph-compare { margin-top: 6px; }\n.dsa-delta { font-weight: 700; padding: 1px 6px; border-radius: 8px; }\n.dsa-delta.dsa-up { color: #1e6b25; background: rgba(46, 125, 50, 0.12); }\n.dsa-delta.dsa-down { color: #9b1c1c; background: rgba(183, 28, 28, 0.1); }\n.dsa-delta.dsa-same { color: #565959; background: rgba(0, 0, 0, 0.06); }\n.dsa-ph-details { margin-top: 6px; }\n.dsa-ph-details > summary { cursor: pointer; color: #007185; }\n.dsa-ph-list { margin: 6px 0; padding: 0; list-style: none; }\n.dsa-ph-list li { margin: 1px 0; padding-left: 2.6em; text-indent: -2.6em; }\n.dsa-ph-list li.dsa-good { color: #1e6b25; }\n.dsa-ph-list li.dsa-bad { color: #9b1c1c; }\n.dsa-product-error { --dsa-bg: #f3f3f3; --dsa-edge: #888; --dsa-ink: #565959; }\n";
   (document.head || document.documentElement).appendChild(style);
 })();
 
@@ -93,6 +99,23 @@ globalThis.DSA_CONFIG = {
     learnedBlocked: -20
   },
 
+  // Product-page signals (see src/product.js).
+  productWeights: {
+    veryNew: -8,            // listing under 3 months old (Date First Available)
+    manyOneStar: -6,        // 15%+ of reviews are 1-star
+    thinMiddle: -5,         // 85%+ 5-star but under 6% 4-star
+    soldByAmazon: 5,
+    anonymousSeller: -6,    // seller is a run-together trading-company registration
+    bulletBrackets: -6,     // \u3010BRACKETED\u3011 bullet headings
+    bulletFlorid: -4,       // 3+ marketing phrases in the bullets
+    bulletServicePush: -4,  // "contact us", "risk-free", "100% satisfaction"\u2026
+    bulletObfuscated: -10,  // "baguett-e", "safe-ty"
+    bulletWall: -6,         // bullets over 1,800 characters
+    bulletLong: -3,         // 1,300\u20131,800
+    bulletConcise: 3,       // under 600 characters
+    frequentlyReturned: -12
+  },
+
   // When a brand gets learned. "Evidence" is a listing's score with all brand points removed,
   // so a brand's own rating can't feed back into what's learned about it.
   learning: {
@@ -142,7 +165,8 @@ globalThis.DSA_BRANDS = {
     "Fox Run", "Bellemain", "Silpat", "Ateco", "Paderno", "Cuisipro", "Microplane",
     "Joseph Joseph", "Great Jones", "Caraway", "GreenPan", "Our Place", "Misen", "Zyliss",
     "Brod & Taylor", "King Arthur", "Sassafras", "Ooni", "Baking Steel", "Doughmakers",
-    "Kaiser Bakeware", "Birkmann", "St\u00e4dter", "Stadter", "RBV Birkmann", "Zenker", "Dr. Oetker", "L\u00e9ku\u00e9", "Lekue", "R\u00f6sle", "Rosle", "Tramontina",
+    "Kaiser Bakeware", "Birkmann", "Reynolds", "Reynolds Wrap", "Hefty", "Saran", "Kirkland Signature", "Hormel",
+    "Vitafusion", "Olly", "SmartyPants", "Florsheim", "Allen Edmonds", "Woodlore", "Rockport", "Levi's", "Dockers", "St\u00e4dter", "Stadter", "RBV Birkmann", "Zenker", "Dr. Oetker", "L\u00e9ku\u00e9", "Lekue", "R\u00f6sle", "Rosle", "Tramontina",
     "Cuisinox", "Demeyere", "Viking Culinary", "Cook N Home", "Prepworks", "Chef'n", "Ninja", "Instant Pot", "Instant Brands", "Crock-Pot", "Hamilton Beach",
     "Proctor Silex", "Breville", "De'Longhi", "DeLonghi", "Nespresso", "Keurig", "Mr. Coffee",
     "Bodum", "Hario", "Chemex", "Baratza", "Bonavita", "Zojirushi", "Vitamix", "Blendtec", "NutriBullet", "Magic Bullet", "Oster", "Sunbeam", "Black+Decker",
@@ -247,7 +271,9 @@ globalThis.DSA_BRANDS = {
     "Maybelline", "e.l.f.", "NYX", "Colgate", "Crest", "Sensodyne", "Listerine",
     "Philips Norelco", "Schick", "Bic", "Tylenol", "Advil", "Motrin",
     "Aleve", "Bayer", "Benadryl", "Zyrtec", "Claritin", "Allegra", "Flonase", "Mucinex",
-    "Vicks", "Nature Made", "Nature's Bounty", "Centrum", "One A Day", "Garden of Life",
+    "Vicks", "Nature Made", "Nature's Bounty", "Centrum", "One A Day", "Garden of Life", "Pure Encapsulations", "Thorne", "Solgar", "Life Extension", "Doctor's Best",
+    "Jarrow Formulas", "Nordic Naturals", "Kirkland Signature", "Nutricost", "NatureWise", "Natrol",
+    "Rainbow Light", "MegaFood", "New Chapter", "Swanson", "Bluebonnet", "Country Life", "Klaire Labs",
     "NOW Foods", "NOW Supplements", "Optimum Nutrition", "Vital Proteins", "Orgain",
     "Omron", "Braun ThermoScan", "iHealth", "Band-Aid", "Nexcare", "Curad",
     "Johnson & Johnson", "Kleenex", "Charmin", "Cottonelle", "Huggies", "Pampers",
@@ -310,7 +336,8 @@ globalThis.DSA_BRANDS = {
     "Lifetime", "Method", "Command", "Halo", "Hatch", "Fellow", "Dash", "Away", "Branch", "Tile",
     "Polar", "Lucid", "Pilot", "Zebra", "Expo", "Orbit", "Cobra", "Smith", "Costa", "Ping",
     "Nomad", "Rivet", "Uplift", "Beats", "Lee", "Hart", "Sharp", "Klein", "Gorilla", "Scotch",
-    "Mothers", "Optima", "Champion", "Converse", "Coach", "Glad", "Dove", "Bounty", "Tide"
+    "Mothers", "Optima", "Champion", "Converse", "Coach", "Glad", "Dove", "Bounty", "Tide",
+    "Dawn", "Cascade", "Scott", "Dixie", "Solo", "Kiwi"
   ],
 
   // Throwaway / nonsense names confirmed by hand.
@@ -714,27 +741,27 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
 
     // Reviews and rating
     const rc = l.reviewCount;
-    if (rc === 0 || rc == null && l.rating == null) add(reasons, W.noReviews, "No reviews");
+    if (rc === 0 || rc == null && l.rating == null) add(reasons, W.noReviews, "No reviews", "reviews");
     else if (rc != null) {
-      if (rc < 10) add(reasons, W.under10Reviews, `Only ${rc} review${rc === 1 ? "" : "s"}`);
-      else if (rc < 50) add(reasons, W.under50Reviews, `Few reviews (${rc})`);
-      else if (rc >= 3000) add(reasons, W.over3000Reviews, `Many reviews (${fmt(rc)})`);
-      else if (rc >= 1000) add(reasons, W.over1000Reviews, `Many reviews (${fmt(rc)})`);
-      else if (rc >= 200) add(reasons, W.over200Reviews, `Solid review count (${rc})`);
+      if (rc < 10) add(reasons, W.under10Reviews, `Only ${rc} review${rc === 1 ? "" : "s"}`, "reviews");
+      else if (rc < 50) add(reasons, W.under50Reviews, `Few reviews (${rc})`, "reviews");
+      else if (rc >= 3000) add(reasons, W.over3000Reviews, `Many reviews (${fmt(rc)})`, "reviews");
+      else if (rc >= 1000) add(reasons, W.over1000Reviews, `Many reviews (${fmt(rc)})`, "reviews");
+      else if (rc >= 200) add(reasons, W.over200Reviews, `Solid review count (${rc})`, "reviews");
       if (l.rating != null && l.rating >= 4.9 && rc > 0 && rc < 30) {
-        add(reasons, W.tooPerfect, `Near-perfect ${l.rating}\u2605 on very few reviews`);
+        add(reasons, W.tooPerfect, `Near-perfect ${l.rating}\u2605 on very few reviews`, "reviews");
       }
-      if (l.rating != null && l.rating < 4.0 && rc >= 20) add(reasons, W.lowRating, `Low rating (${l.rating}\u2605)`);
+      if (l.rating != null && l.rating < 4.0 && rc >= 20) add(reasons, W.lowRating, `Low rating (${l.rating}\u2605)`, "reviews");
     }
     if (l.newListing) add(reasons, W.newListing, "New on Amazon this month");
 
     // Listing age. Amazon hands out product IDs (ASINs) in sequence, so the ID dates the listing.
     // Throwaway sellers churn new listings; long-running products keep their old ones.
     const era = asinEra(l.asin);
-    if (era === "vintage") add(reasons, W.asinVintage, "Listed on Amazon for 10+ years");
-    else if (era === "old") add(reasons, W.asinOld, "Listed on Amazon since ~2015\u20132018");
-    else if (era === "recent") add(reasons, W.asinRecent, "Listed on Amazon since ~2018\u20132020");
-    else if (era === "new") add(reasons, W.asinNew, "Listing created in the last year or so");
+    if (era === "vintage") add(reasons, W.asinVintage, "Listed on Amazon for 10+ years", "age");
+    else if (era === "old") add(reasons, W.asinOld, "Listed on Amazon since ~2015\u20132018", "age");
+    else if (era === "recent") add(reasons, W.asinRecent, "Listed on Amazon since ~2018\u20132020", "age");
+    else if (era === "new") add(reasons, W.asinNew, "Listing created in the last year or so", "age");
 
     // Price far below the page median
     if (l.price && ctx.medianPrice && l.price < 0.45 * ctx.medianPrice) {
@@ -1001,6 +1028,287 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
 })(typeof globalThis !== "undefined" ? globalThis : this);
 
 ;
+// ---- src/product.js ----
+// Disenshittify Amazon \u2014 product pages.
+// extractProduct(document) reads what a product page offers beyond the search results card;
+// refineScore(initial, product, cfg, bigrams) turns the search-results estimate into a better one
+// and says exactly what changed. extractProduct needs a DOM; refineScore is pure (runs in Node tests).
+
+(function (root) {
+  "use strict";
+
+  const T = el => el ? (el.textContent || "").replace(/[\s\u200e\u200f]+/g, " ").trim() : "";
+
+  // ---------- reading the page ----------
+
+  function detailRows(doc) {
+    const rows = {};
+    // Table layouts: <tr><th>Brand Name</th><td>Pavsrmy</td></tr>
+    for (const tr of doc.querySelectorAll("tr")) {
+      const th = tr.querySelector("th"), td = tr.querySelector("td");
+      if (th && td) rows[T(th).toLowerCase()] = T(td);
+    }
+    // Bullet layouts: <li><span class="a-text-bold">Date First Available :</span> <span>March 3, 2014</span></li>
+    for (const li of doc.querySelectorAll("#detailBullets_feature_div li, #detailBulletsWrapper_feature_div li")) {
+      const m = /^([^:]{2,60}?)\s*:\s*(.+)$/.exec(T(li));
+      if (m) rows[m[1].trim().toLowerCase()] = m[2].trim();
+    }
+    return rows;
+  }
+
+  function extractProduct(doc) {
+    const q = s => doc.querySelector(s);
+    const rows = detailRows(doc);
+    const get = (...names) => { for (const n of names) if (rows[n]) return rows[n]; return null; };
+
+    const asin = (get("asin") || (/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/.exec(doc.location ? doc.location.pathname : "") || [])[1] ||
+      (q("#ASIN") && q("#ASIN").value) || "").trim() || null;
+
+    const byline = q("#bylineInfo");
+    const bylineText = T(byline);
+    const bylineHref = byline ? byline.getAttribute("href") || "" : "";
+    let brand = get("brand name", "brand");
+    if (!brand) {
+      const m = /^(?:Visit the (.+?) Store|Brand:\s*(.+))$/i.exec(bylineText);
+      if (m) brand = (m[1] || m[2]).trim();
+    }
+
+    const histogram = {};
+    for (const el of doc.querySelectorAll('[aria-label*="percent of reviews have"]')) {
+      const m = /(\d+)\s*percent of reviews have\s*(\d)\s*star/i.exec(el.getAttribute("aria-label"));
+      if (m && histogram[m[2]] === undefined) histogram[m[2]] = +m[1];
+    }
+
+    const ratingM = /([\d.]+) out of 5/.exec((q("#acrPopover") && q("#acrPopover").getAttribute("title")) || T(q("#acrPopover")));
+    const countM = /([\d,]+)/.exec(T(q("#acrCustomerReviewText")));
+
+    // Seller: "Ships from Amazon / Sold by Pavsrmy" boxes, or the older "Sold by X and Fulfilled by Amazon" line.
+    const feature = name => T(q(`[offer-display-feature-name="${name}"] .offer-display-feature-text-message`));
+    let soldBy = feature("desktop-merchant-info") || T(q("#sellerProfileTriggerId"));
+    let shipsFrom = feature("desktop-fulfiller-info");
+    const merchantLine = T(q("#merchant-info, #merchantInfo"));
+    if (!soldBy) { const m = /Sold by (.+?)(?: and | \.|$)/i.exec(merchantLine); if (m) soldBy = m[1]; }
+    if (!shipsFrom && /Fulfilled by Amazon|Ships from (and sold by )?Amazon/i.test(merchantLine)) shipsFrom = "Amazon";
+
+    const bullets = [...doc.querySelectorAll("#feature-bullets li")].map(T).filter(Boolean);
+
+    return {
+      asin,
+      title: T(q("#productTitle")),
+      brand: brand || null,
+      bylineText,
+      brandStore: /\/stores\//.test(bylineHref),
+      manufacturer: get("manufacturer"),
+      dateFirstAvailable: get("date first available"),
+      rating: ratingM ? +ratingM[1] : null,
+      reviewCount: countM ? +countM[1].replace(/,/g, "") : null,
+      histogram: Object.keys(histogram).length === 5 ? histogram : null,
+      soldBy: soldBy || null,
+      shipsFrom: shipsFrom || null,
+      bullets,
+      bulletChars: bullets.join(" \n ").length,
+      frequentlyReturned: /Frequently returned item/i.test(T(q("#centerCol, #ppd")) || "")
+    };
+  }
+
+  // ---------- refining the score ----------
+
+  const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+  function parseDate(s) {
+    const m = /([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})/.exec(s || "");
+    if (m && MONTHS[m[1].toLowerCase()] !== undefined) return new Date(+m[3], MONTHS[m[1].toLowerCase()], +m[2]);
+    const d = /(\d{1,2})\s+([A-Za-z]{3})[a-z]*\.?\s+(\d{4})/.exec(s || "");
+    if (d && MONTHS[d[2].toLowerCase()] !== undefined) return new Date(+d[3], MONTHS[d[2].toLowerCase()], +d[1]);
+    return null;
+  }
+
+  const CS_PUSH = /(contact us|customer service|100% satisfaction|satisfaction guarantee|risk[- ]free|worry[- ]free|money[- ]back|no questions asked|after-sales|after sales)/i;
+
+  // initial: { score, tier, reasons: [{pts, text, tag}] } from the search results page (or null).
+  // product: from extractProduct. Returns { score, tier, reasons, changes: [{pts, text}], initial }.
+  function refineScore(initial, product, cfg, bigrams, scorer, now) {
+    const W = cfg.weights;
+    const PW = cfg.productWeights;
+    now = now || Date.now();
+
+    // Start from the search-results reasons. Without them (page opened directly), score the product
+    // page's own title/rating as a one-listing page.
+    let base = initial && initial.reasons ? initial.reasons.map(r => Object.assign({}, r)) : null;
+    let baseScore = initial && initial.reasons ? initial.score : null;
+    if (!base) {
+      const one = scorer.scorePage([{
+        asin: product.asin, title: product.title, brandLine: product.brand || "",
+        rating: product.rating != null ? product.rating + " out of 5 stars" : "",
+        reviewCount: product.reviewCount != null ? product.reviewCount : undefined,
+        reviewExact: product.reviewCount != null ? true : undefined
+      }], cfg, bigrams);
+      base = one.get(0).reasons.map(r => Object.assign({}, r));
+      baseScore = one.get(0).score;
+    }
+
+    const changes = [];
+    const replace = (tag, newReasons, why) => {
+      const old = base.filter(r => r.tag === tag);
+      const oldPts = old.reduce((s, r) => s + r.pts, 0);
+      const newPts = newReasons.reduce((s, r) => s + r.pts, 0);
+      base = base.filter(r => r.tag !== tag).concat(newReasons.map(r => Object.assign({ tag }, r)));
+      // Confirmations count too: "Brand confirmed as Hohner" with 0 points still tells you the estimate held.
+      changes.push({ pts: newPts - oldPts, text: why(old, newReasons) });
+    };
+    const addProduct = (pts, text) => {
+      if (!pts) return;
+      base.push({ pts, text, tag: "product" });
+      changes.push({ pts, text });
+    };
+
+    // 1. The real brand, stated by Amazon, instead of a guess from the title.
+    if (product.brand) {
+      const b = scorer.detectBrand({ title: product.title || product.brand, brandLine: product.brand },
+        { midTitleVocab: new Map(), docFreq: new Map() }, cfg, bigrams);
+      const B = W;
+      const text =
+        b.kind === "user-trusted" ? "You trust " + b.name :
+        b.kind === "user-blocked" ? "You blocked " + b.name :
+        b.kind === "known" ? "Established brand: " + b.name :
+        b.kind === "blocked" ? "Brand on the junk-name list: " + b.name :
+        b.kind === "learned-trusted" ? "Learned: " + b.name + " has looked solid across your searches" :
+        b.kind === "learned-blocked" ? "Learned: " + b.name + " keeps rating as junk across your searches" :
+        b.kind === "gibberish" ? "Brand looks like a random string: " + b.name :
+        "Unrecognized brand: " + b.name;
+      const pts =
+        b.kind === "user-trusted" ? B.userTrusted : b.kind === "user-blocked" ? B.userBlocked :
+        b.kind === "known" ? B.knownBrand : b.kind === "blocked" ? B.blockedBrand :
+        b.kind === "learned-trusted" ? B.learnedTrusted : b.kind === "learned-blocked" ? B.learnedBlocked :
+        b.kind === "gibberish" ? B.gibberishBrand : B.unrecognizedBrand;
+      replace("brand", [{ pts, text }], (old) => {
+        const guess = old.length ? old[0].text : "";
+        const same = guess && guess.toLowerCase().includes(product.brand.toLowerCase());
+        return `Brand confirmed as ${product.brand}` + (guess && !same ? ` (search results guessed: ${guess.replace(/^[^:]*:\s*/, "")})` : "");
+      });
+    }
+
+    // 2. Exact listing date, when Amazon shows it, instead of the estimate from the product ID.
+    const first = parseDate(product.dateFirstAvailable);
+    if (first) {
+      const years = (now - first.getTime()) / (365.25 * 864e5);
+      const pts = years >= 10 ? W.asinVintage : years >= 5 ? W.asinOld : years >= 2 ? W.asinRecent :
+                  years < 0.25 ? PW.veryNew : years < 1 ? W.asinNew : 0;
+      const label = years >= 1 ? `${Math.floor(years)} year${Math.floor(years) === 1 ? "" : "s"}` : `${Math.max(1, Math.round(years * 12))} month${Math.round(years * 12) === 1 ? "" : "s"}`;
+      replace("age", pts ? [{ pts, text: `On Amazon since ${product.dateFirstAvailable} (${label})` }] : [],
+        () => `Listing date confirmed: ${product.dateFirstAvailable}`);
+    }
+
+    // 3. Exact review count (search results round to "1.5K").
+    if (product.reviewCount != null && product.rating != null) {
+      const rc = product.reviewCount;
+      const r = [];
+      if (rc === 0) r.push({ pts: W.noReviews, text: "No reviews" });
+      else if (rc < 10) r.push({ pts: W.under10Reviews, text: `Only ${rc} review${rc === 1 ? "" : "s"}` });
+      else if (rc < 50) r.push({ pts: W.under50Reviews, text: `Few reviews (${rc})` });
+      else if (rc >= 3000) r.push({ pts: W.over3000Reviews, text: `Many reviews (${rc.toLocaleString("en-US")})` });
+      else if (rc >= 1000) r.push({ pts: W.over1000Reviews, text: `Many reviews (${rc.toLocaleString("en-US")})` });
+      else if (rc >= 200) r.push({ pts: W.over200Reviews, text: `Solid review count (${rc})` });
+      if (product.rating >= 4.9 && rc > 0 && rc < 30) r.push({ pts: W.tooPerfect, text: `Near-perfect ${product.rating}\u2605 on very few reviews` });
+      if (product.rating < 4.0 && rc >= 20) r.push({ pts: W.lowRating, text: `Low rating (${product.rating}\u2605)` });
+      replace("reviews", r, () => `Exact review count: ${rc.toLocaleString("en-US")}`);
+    }
+
+    // 4. How the stars are spread. Only the extremes count: on real pages a 6\u20139% share of 1\u2605 is normal
+    //    for appliances (Bionaire, Amazon Basics), and junk and real brands both sit around 10\u201313% 4\u2605.
+    const h = product.histogram;
+    if (h && (product.reviewCount || 0) >= 30) {
+      if (h[1] >= 15) addProduct(PW.manyOneStar, `${h[1]}% of reviews are 1-star`);
+      if (h[5] >= 85 && h[4] < 6) addProduct(PW.thinMiddle, `Ratings pile up at 5\u2605 (${h[5]}%) with only ${h[4]}% 4\u2605 \u2014 typical of padded reviews`);
+    }
+
+    // 5. Who sells it.
+    const seller = (product.soldBy || "").trim();
+    if (/^amazon(\.com)?$/i.test(seller)) addProduct(PW.soldByAmazon, "Sold by Amazon.com");
+    else if (seller && isAnonymousSeller(seller)) addProduct(PW.anonymousSeller, `Sold by an anonymous trading account ("${seller}")`);
+
+    // 6. Bullet points. On real pages, junk listings ran 1,400\u20132,000 characters with 4\u20137 marketing
+    //    phrases; established brands ran 200\u20131,200 with at most 2.
+    const bullets = product.bullets || [];
+    if (bullets.length) {
+      const all = bullets.join(" \n ");
+      const chars = product.bulletChars || all.length;
+      const brackets = (all.match(/[\u3010\[\u300c\u3014]/g) || []).length;
+      if (brackets >= 2) addProduct(PW.bulletBrackets, `Bullet points use \u3010bracketed\u3011 headings (${brackets})`);
+      const florid = new Set();
+      for (const p of cfg.floridPhrases) { const hit = all.match(new RegExp(p, "gi")); if (hit) hit.forEach(x => florid.add(x.toLowerCase())); }
+      if (florid.size >= 3) addProduct(PW.bulletFlorid, `Marketing language in bullet points: ${[...florid].slice(0, 4).map(x => `"${x}"`).join(", ")}`);
+      const push = CS_PUSH.exec(all);
+      if (push) addProduct(PW.bulletServicePush, `Bullet points push customer-service promises ("${push[0]}")`);
+      const broken = (all.match(/\b[a-z]{3,}-[a-z]{1,2}\b/gi) || []).filter(w => !/^(non|pre|re|co|anti|multi|semi|over|under|self)-/i.test(w) && !/-(in|on|up|of|to|by)$/i.test(w));
+      if (broken.length >= 2) addProduct(PW.bulletObfuscated, `Deliberately broken words in bullet points: ${[...new Set(broken)].slice(0, 3).map(x => `"${x}"`).join(", ")}`);
+      if (chars > 1800) addProduct(PW.bulletWall, `Very long bullet points (${chars.toLocaleString("en-US")} characters)`);
+      else if (chars > 1300) addProduct(PW.bulletLong, `Long bullet points (${chars.toLocaleString("en-US")} characters)`);
+      else if (chars < 600 && bullets.length >= 2) addProduct(PW.bulletConcise, "Short, factual bullet points");
+    }
+
+    // 7. Amazon's own warning.
+    if (product.frequentlyReturned) addProduct(PW.frequentlyReturned, "Amazon marks this a frequently returned item");
+
+    const raw = W.base + base.reduce((s, r) => s + r.pts, 0);
+    const score = Math.max(0, Math.min(100, Math.round(raw)));
+    const t = cfg.tiers;
+    const tier = score >= t[0] ? 5 : score >= t[1] ? 4 : score >= t[2] ? 3 : score >= t[3] ? 2 : 1;
+    base.sort((a, b) => a.pts - b.pts);
+    return { score, tier, reasons: base, changes, initial: initial || null, baseScore, at: now };
+  }
+
+  // Seller names that are a run-together romanised company registration ("junshengshangmaodian",
+  // "luoyanggezhibushangmaoyouxiangongsi") rather than a shop name.
+  function isAnonymousSeller(name) {
+    const n = name.toLowerCase();
+    if (/(shangmao|maoyi|youxian|gongsi|keji|dianzi|jingying|zhuanmai|shangmaodian|baihuo|wujin)/.test(n)) return true;
+    return /^[a-z]{16,}$/.test(n);
+  }
+
+  function isProductPage(loc) {
+    return /\/(dp|gp\/product)\/[A-Z0-9]{10}/.test(loc.pathname);
+  }
+
+  // ---------- books, films, TV, music and games: not rated ----------
+  // Trust signals are for physical goods; media is left alone. Game controllers, consoles and other
+  // accessories are still rated.
+  const MEDIA_DP = /\b(book|ebooks|audible|dvd|music|digital_music\w*|digital_video_games|digital_video|kindle\w*|magazines?)\b/;
+  const MEDIA_ROOT = /^(Books|Kindle Store|Audible Books & Originals|Movies & TV|Prime Video|CDs & Vinyl|Digital Music|Magazine Subscriptions)$/;
+  function isMediaPage(doc) {
+    const dp = doc.getElementById("dp");
+    const cls = dp ? dp.className || "" : "";
+    const crumbs = [...doc.querySelectorAll("#wayfinding-breadcrumbs_feature_div a, #wayfinding-breadcrumbs_container a")].map(T);
+    if (MEDIA_DP.test(cls) || (crumbs[0] && MEDIA_ROOT.test(crumbs[0]))) return true;
+    // Video games: the games themselves, not controllers, consoles or accessories.
+    if (/\bvideo_games\b/.test(cls) || crumbs[0] === "Video Games") return crumbs.includes("Games") && !crumbs.some(c => /^(Accessories|Consoles)$/.test(c));
+    return false;
+  }
+  const MEDIA_FORMATS = /^(Paperback|Hardcover|Mass Market Paperback|Kindle|Kindle Edition|Audiobook|Audible Audiobook|Audio CD|MP3 CD|Board book|Spiral-bound|Library Binding|Comics|Vinyl|Audio Cassette|DVD|Blu-ray|4K|4K Ultra HD|Prime Video|MP3 Music|Streaming Music|Magazine)$/i;
+  function isMediaCard(card) {
+    const asin = card.getAttribute("data-asin") || "";
+    if (/^\d{9}[\dX]$/.test(asin)) return true;                                    // an ISBN: a book
+    for (const a of card.querySelectorAll("a.a-text-bold, span.a-text-bold")) if (MEDIA_FORMATS.test(T(a))) return true;
+    const t = T(card);
+    // (textContent runs words together \u2014 "Nov 9, 2022ESRB Rating" \u2014 so no \b before these.)
+    if (/Starring:/.test(t)) return true;                                          // films and TV
+    // Games carry an age rating, but so do controllers and consoles on Amazon: those stay rated.
+    const title = [...card.querySelectorAll("h2")].map(T).join(" ") || t.slice(0, 200);
+    if (GAME_HARDWARE.test(title)) return false;
+    if (/ESRB Rating:|PEGI \d/.test(t)) return true;
+    for (const a of card.querySelectorAll("a.a-text-bold, span.a-text-bold")) if (PLATFORM.test(T(a))) return true;
+    // "Elden Ring - PlayStation 5", "Mario Kart World (Nintendo Switch 2)" \u2014 but not "\u2026 for PS5".
+    return GAME_TITLE.test(title) && !/\bfor (the )?(PlayStation|PS[45]|Xbox|Nintendo|Switch|Steam Deck)/i.test(title);
+  }
+  const PLATFORM = /^(PlayStation ?[2-5]|PS[2-5]|PS Vita|Xbox( Series [XS]| One| 360)?|Nintendo Switch( 2)?|Nintendo 3DS|Wii U?|PC|Mac|Steam Deck|PC Download|Online Game Code)$/i;
+  const GAME_TITLE = /[-\u2013(]\s*(PlayStation ?[45]|PS[45]|Xbox (Series [XS]|One)|Nintendo Switch( 2)?|Steam Deck|PC)\b/i;
+  const GAME_HARDWARE = /\b(controllers?|gamepads?|game ?pads?|(joy|thumb|arcade|fight|fighting|flight|control) ?sticks?|joypads?|leverless|hitbox|hotas|throttle|steering|console|system|bundle|headsets?|headphones?|earbuds|speakers?|charg\w*|case|cables?|adapters?|receiver|dongle|stand|docks?|docking|grips?|skins?|triggers?|memory card|sd card|capture card|micro ?sd|ssd|hard drive|storage|mount|keyboard|mouse|mice|wheel|pedals?|joy-?cons?|amiibo|figure|remote|batter(y|ies)|cover|protector|accessor(y|ies)|camera|webcam|microphone|vr|fan|cooling|gift card|subscription|membership|renewed|\d+ ?(TB|GB))\b/i;
+
+  const api = { extractProduct, refineScore, parseDate, isProductPage, isAnonymousSeller, isMediaPage, isMediaCard };
+  if (typeof module !== "undefined") module.exports = api;
+  else root.DSA_PRODUCT = api;
+})(typeof globalThis !== "undefined" ? globalThis : this);
+
+;
 // ---- src/content.js ----
 // Disenshittify Amazon \u2014 content script for search results pages.
 // Adds a toggle above the left-hand filters. When on, every result card is scored,
@@ -1016,14 +1324,21 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
   const BIGRAMS = globalThis.DSA_BIGRAMS;
   const SCORER = globalThis.DSA_SCORER;
   const MEMORY = globalThis.DSA_MEMORY;
+  const PRODUCT = globalThis.DSA_PRODUCT;
   const CARD_SEL = 'div[data-component-type="s-search-result"]';
   const KEY_ENABLED = "dsaEnabled";
   const KEY_SORT = "dsaSort";                 // "trust" | "unit" | null (Amazon's own sort)
   const KEY_FEATURED_FOR = "dsaFeaturedFor";  // search where you picked Amazon's raw "Featured"
   const KEY_OLD_UNIT_SORT = "dsaUnitSort";    // v0.4.x
+  const KEY_LISTINGS = "dsaListings";
+  const KEY_LAST_CLICK = "dsaLastClick";      // the search result you last clicked through: {a: ASIN, at}         // per-ASIN: search-results estimate + product-page check
+  const LISTINGS_MAX = 300;                   // most recently seen listings kept
+  const CHECK_TTL = 30 * 864e5;               // product-page checks are reused for 30 days
   const KEY_MEMORY = "dsaMemory";
 
   let enabled = false;
+  let lastClick = null;     // { a: ASIN, at } \u2014 the search result last clicked through
+  let listings = {};        // ASIN \u2192 { s, t, r: [[pts, text, tag]], q, at, p?: { s, t, at, ch: [[pts, text]] } }
   let lastResults = null;   // last scoring, for refreshing the status line
   let lastPromoCount = 0;
   let sortChoice = null;    // "trust" | "unit" chosen in the Sort by menu (kept across searches), or null
@@ -1258,7 +1573,8 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
     if (up) card.dataset.dsaUnit = up.label; else delete card.dataset.dsaUnit;
 
     const badge = el("details", { class: "dsa-badge" },
-      el("summary", null, `Trust ${result.tier}/5`, el("span", { class: "dsa-score" }, ` \u00b7 ${result.score}`)));
+      el("summary", null, `Trust ${result.tier}/5`, el("span", { class: "dsa-score" }, ` \u00b7 ${result.score}`),
+        result.checked ? el("span", { class: "dsa-checked", title: "Checked on its product page" }, " \u2713") : null));
     // The pop-over (reasons, unit price, Trust/Block) is only built when the badge is first opened,
     // so a page of 50 closed badges costs a few dozen elements instead of ~2,000.
     let built = false;
@@ -1297,6 +1613,172 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
     card.querySelectorAll(".dsa-badge").forEach(b => b.remove());
     card.querySelectorAll(".dsa-paint").forEach(t => t.classList.remove("dsa-paint"));
     if (card.classList.contains("dsa-paint")) card.classList.remove("dsa-paint");
+  }
+
+  // ---------- search-results estimates and product-page checks ----------
+
+  // Keep each listing's search-results estimate so its product page can show what changed.
+  function rememberEstimates(results) {
+    const now = Date.now();
+    const q = currentQuery();
+    for (const r of results.values()) {
+      if (!r.asin || r.listing.sponsored && listings[r.asin]) continue;
+      const prev = listings[r.asin] || {};
+      listings[r.asin] = Object.assign(prev, {
+        s: r.score, t: r.tier, q, at: now,
+        r: r.reasons.map(x => [x.pts, x.text, x.tag || ""])
+      });
+    }
+    pruneListings();
+    storeSet(KEY_LISTINGS, listings);
+  }
+
+  function pruneListings() {
+    const keys = Object.keys(listings);
+    if (keys.length <= LISTINGS_MAX) return;
+    keys.sort((a, b) => (listings[b].at || 0) - (listings[a].at || 0));
+    for (const k of keys.slice(LISTINGS_MAX)) delete listings[k];
+  }
+
+  // A listing checked on its product page carries that result back to the search results, as the
+  // difference it made (so your later votes and learning still apply on top).
+  function applyProductChecks(results) {
+    const now = Date.now();
+    for (const r of results.values()) {
+      const rec = listings[r.asin];
+      if (!rec || !rec.p || now - rec.p.at > CHECK_TTL) continue;
+      const delta = rec.p.s - rec.p.base;
+      r.reasons.push({ pts: delta, text: delta ? `Checked on its product page (${delta > 0 ? "+" : "\u2212"}${Math.abs(delta)})` : "Checked on its product page (no change)", tag: "checked" });
+      r.score = Math.max(0, Math.min(100, r.score + delta));
+      const t = CFG.tiers;
+      r.tier = r.score >= t[0] ? 5 : r.score >= t[1] ? 4 : r.score >= t[2] ? 3 : r.score >= t[3] ? 2 : 1;
+      r.checked = true;
+      r.reasons.sort((a, b) => a.pts - b.pts);
+    }
+  }
+
+  // ---------- product pages ----------
+
+  function productPanel(refined, product) {
+    const c = colorsFor(refined.score);
+    const init = refined.initial;
+    // What the product page added up to, before the 0\u2013100 limits. If the score was already pinned at
+    // 0 or 100, say so instead of claiming "no change".
+    const delta = refined.changes.reduce((a, x) => a + x.pts, 0);
+    const pinned = delta && refined.baseScore != null && refined.score === refined.baseScore ? (refined.score === 0 ? " \u2014 already at the bottom of the scale" : " \u2014 already at the top of the scale") : "";
+    const panel = el("div", { id: "dsa-product", class: "dsa-product" });
+    panel.style.setProperty("--dsa-bg", c.bg);
+    panel.style.setProperty("--dsa-edge", c.edge);
+    panel.style.setProperty("--dsa-ink", c.ink);
+
+    // The change in score from the estimate this page started from: the search-results rating, or,
+    // for a page opened directly, the rating from its title, stars and review count alone.
+    const from = refined.baseScore != null ? refined.baseScore : refined.score;
+    const moved = refined.score - from;
+    const cls = moved > 0 ? "dsa-up" : moved < 0 ? "dsa-down" : "dsa-same";
+    const deltaText = moved > 0 ? `\u25b2${moved}` : moved < 0 ? `\u25bc${Math.abs(moved)}` : "\u2013";
+    const deltaTip = (init ? "Change from the search-results estimate" : "Change from the estimate from the title, stars and reviews alone") +
+      ` (${from} \u2192 ${refined.score})`;
+    const head = el("div", { class: "dsa-ph-head" },
+      el("span", { class: "dsa-ph-pill" }, `Trust ${refined.tier}/5`, el("span", { class: "dsa-score" }, ` \u00b7 ${refined.score}`)),
+      el("span", { class: "dsa-ph-delta " + cls, title: deltaTip }, deltaText),
+      el("span", { class: "dsa-ph-title" }, "Disenshittify"));
+    let compare;
+    if (!init) {
+      compare = el("div", { class: "dsa-ph-compare" }, "Not in your recent search results \u2014 rated from this page.",
+        pinned ? el("span", { class: "dsa-muted" }, pinned) : null);
+    } else {
+      compare = el("div", { class: "dsa-ph-compare" },
+        refined.variantOf ? "Search results (another size/colour): " : "Search results: ", el("b", null, `${init.tier}/5 \u00b7 ${init.score}`),
+        "  \u2192  this page: ", el("b", null, `${refined.tier}/5 \u00b7 ${refined.score}`),
+        pinned ? el("span", { class: "dsa-muted" }, pinned) : null,
+        init.tier !== refined.tier ? el("span", { class: "dsa-muted" }, `  (tier ${init.tier} \u2192 ${refined.tier})`) : null);
+    }
+
+    const details = el("details", { class: "dsa-ph-details" }, el("summary", null, "What the product page showed"));
+    const ch = el("ul", { class: "dsa-ph-list" });
+    for (const x of refined.changes) {
+      ch.append(el("li", { class: x.pts > 0 ? "dsa-good" : x.pts < 0 ? "dsa-bad" : "dsa-muted" },
+        `${x.pts > 0 ? "+" + x.pts : x.pts < 0 ? "\u2212" + Math.abs(x.pts) : "\u00b10"}  ${x.text}`));
+    }
+    if (!refined.changes.length) ch.append(el("li", { class: "dsa-muted" }, "Nothing here changes the estimate."));
+    const all = el("ul", { class: "dsa-ph-list" });
+    for (const x of refined.reasons) {
+      if (!x.pts) continue;
+      all.append(el("li", { class: x.pts > 0 ? "dsa-good" : "dsa-bad" }, `${x.pts > 0 ? "+" : "\u2212"}${Math.abs(x.pts)}  ${x.text}`));
+    }
+    details.append(ch, el("div", { class: "dsa-phead" }, "All reasons"), all);
+
+    const key = product.brand ? SCORER.brandKey(product.brand) : null;
+    if (key) {
+      const current = memory.votes[key];
+      details.append(el("div", { class: "dsa-brandrow" },
+        el("span", { class: "dsa-brandname" }, product.brand),
+        button(current === "trust" ? "Trusted \u2713" : "Trust", current === "trust" ? "dsa-on dsa-trust" : "dsa-trust",
+          () => { memory = MEMORY.setVote(memory, key, product.brand, current === "trust" ? null : "trust"); refreshLearned(); storeSet(KEY_MEMORY, memory); runProductPage(true); }),
+        button(current === "block" ? "Blocked \u2713" : "Block", current === "block" ? "dsa-on dsa-block" : "dsa-block",
+          () => { memory = MEMORY.setVote(memory, key, product.brand, current === "block" ? null : "block"); refreshLearned(); storeSet(KEY_MEMORY, memory); runProductPage(true); })));
+    }
+    panel.append(head, compare, details);
+    return panel;
+  }
+
+  // Which search-results estimate this page belongs to. The page's own ASIN often isn't the one you
+  // clicked: Amazon opens the size or colour you picked last time, or you switch variants here. So also
+  // try the page's other variants (the size/colour swatches) and the result you last clicked.
+  function findInitial(asin) {
+    const tries = [asin];
+    for (const e of document.querySelectorAll('[id*="twister" i] [data-asin], [id*="twister" i] [data-defaultasin], [id*="twister" i] [data-csa-c-item-id]')) {
+      const a = e.getAttribute("data-asin") || e.getAttribute("data-defaultasin") || e.getAttribute("data-csa-c-item-id") || "";
+      if (/^[A-Z0-9]{10}$/.test(a) && !tries.includes(a)) tries.push(a);
+    }
+    const fromSearch = /\/s(\?|$)|[?&]k=/.test((() => { try { return new URL(document.referrer).pathname + new URL(document.referrer).search; } catch (e) { return ""; } })());
+    if (lastClick && lastClick.a && Date.now() - lastClick.at < 30 * 60e3 && (fromSearch || tries.includes(lastClick.a)) && !tries.includes(lastClick.a)) tries.push(lastClick.a);
+    // A record for this exact ASIN wins; otherwise the most recently seen variant.
+    let best = null;
+    for (const a of tries) {
+      const rec = listings[a];
+      if (!rec || !rec.r) continue;
+      if (a === asin) return { asin: a, rec };
+      if (!best || rec.at > best.rec.at) best = { asin: a, rec };
+    }
+    return best;
+  }
+
+  function runProductPage(reopen) {
+    const old = document.getElementById("dsa-product");
+    if (!enabled) { if (old) old.remove(); return; }
+    const anchor = document.querySelector("#titleSection, #title_feature_div, #title");
+    if (!anchor || !document.querySelector("#productTitle")) return;
+    if (PRODUCT.isMediaPage(document)) { if (old) old.remove(); return; }   // books, films, TV, music, games
+    try {
+      const product = PRODUCT.extractProduct(document);
+      const urlAsin = (/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/.exec(location.pathname) || [])[1];
+      if (!product.asin) product.asin = urlAsin;
+      const found = findInitial(product.asin);
+      const rec = found && found.rec;
+      const initial = rec ? { score: rec.s, tier: rec.t, reasons: rec.r.map(([pts, text, tag]) => ({ pts, text, tag: tag || undefined })) } : null;
+      const refined = PRODUCT.refineScore(initial, product, scoringConfig(), BIGRAMS, SCORER);
+      refined.variantOf = found && found.asin !== product.asin ? found.asin : null;
+      // Remember the check for the search results, under this ASIN and the one the estimate came from.
+      const check = { s: refined.score, t: refined.tier, base: refined.baseScore != null ? refined.baseScore : refined.score, at: Date.now(),
+                      ch: refined.changes.map(x => [x.pts, x.text]) };
+      listings[product.asin] = Object.assign(listings[product.asin] || { q: rec ? rec.q : "", at: Date.now() }, { p: check });
+      if (found && found.asin !== product.asin) listings[found.asin].p = check;
+      pruneListings();
+      storeSet(KEY_LISTINGS, listings);
+
+      const panel = productPanel(refined, product);
+      if (reopen) panel.querySelector(".dsa-ph-details").open = true;
+      if (old) old.replaceWith(panel); else anchor.insertAdjacentElement("afterend", panel);
+    } catch (e) {
+      // Never fail silently: say so on the page, with the error, so it can be reported.
+      console.error("[Disenshittify] product page:", e);
+      const panel = el("div", { id: "dsa-product", class: "dsa-product dsa-product-error" },
+        el("div", { class: "dsa-ph-head" }, el("span", { class: "dsa-ph-title" }, "Disenshittify")),
+        el("div", { class: "dsa-ph-compare" }, "Couldn't rate this page: " + (e && e.message || e)));
+      if (old) old.replaceWith(panel); else anchor.insertAdjacentElement("afterend", panel);
+    }
   }
 
   // ---------- promos and ad blocks ----------
@@ -1359,6 +1841,17 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
 
   function cards() { return [...document.querySelectorAll(CARD_SEL)].filter(c => c.dataset.asin); }
 
+  // Books, films, TV, music and games aren't rated. A search where nearly everything (80%+) is
+  // media gets no Disenshittify at all; on mixed pages the media results are just left alone.
+  function isMedia(card) {
+    if (card.dataset.dsaMedia === undefined) card.dataset.dsaMedia = PRODUCT.isMediaCard(card) ? "1" : "";
+    return card.dataset.dsaMedia === "1";
+  }
+  function isMediaSearch() {
+    const list = cards();
+    return list.length > 0 && list.filter(isMedia).length >= list.length * 0.8;
+  }
+
   function apply() {
     const list = cards();
     if (!list.length) return;
@@ -1374,8 +1867,12 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
         snapshot = { order: new Map([...parents].map(p => [p, [...p.children]])), cards: new Set(list) };
       }
 
-      const raws = list.map(scrapeCard);
+      const media = list.filter(isMedia);
+      const rated = list.filter(c => !isMedia(c));
+      const raws = rated.map(scrapeCard);
       const results = SCORER.scorePage(raws, scoringConfig(), BIGRAMS);
+      rememberEstimates(results);
+      applyProductChecks(results);
 
       // Learn from this page (uses brand-free evidence, so it can't reinforce itself).
       memory = MEMORY.recordPage(memory, results, currentQuery(), CFG.learning);
@@ -1385,7 +1882,7 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
       // Decorate every card, and hide repeat placements of the same product
       // (keeping the organic copy over the sponsored one).
       const keep = new Map();
-      list.forEach((card, i) => {
+      rated.forEach((card, i) => {
         const r = results.get(i);
         decorate(card, r);
         const prev = keep.get(r.asin);
@@ -1403,9 +1900,18 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
       restoreOrder();
       const mode = currentMode();
       if (mode !== "amazon") {
-        const order = mode === "unit"
-          ? unitOrder(list, raws, results)
-          : list.map((card, i) => ({ card, i, score: results.get(i).score })).sort((a, b) => b.score - a.score || a.i - b.i);
+        const sorted = mode === "unit"
+          ? unitOrder(rated, raws, results)
+          : rated.map((card, i) => ({ card, i, score: results.get(i).score })).sort((a, b) => b.score - a.score || a.i - b.i);
+        // Unrated media (games, books, films) keep the places Amazon gave them \u2014 a search for a game
+        // keeps the game on top; the rated listings are sorted around them.
+        const order = [];
+        let next = 0;
+        for (const card of cards()) {
+          if (media.includes(card)) order.push({ card });
+          else if (next < sorted.length) order.push(sorted[next++]);
+        }
+        while (next < sorted.length) order.push(sorted[next++]);
         const firstResult = [...slot.children].find(node => node.matches(CARD_SEL));
         const anchor = document.createComment("dsa-sorted");
         slot.insertBefore(anchor, firstResult);
@@ -1631,6 +2137,8 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
       const tiers = [0, 0, 0, 0, 0, 0];
       for (const c of visible) tiers[+c.dataset.dsaTier]++;
       const extras = [];
+      const media = cards().filter(c => c.dataset.dsaMedia === "1").length;
+      if (media) extras.push(`${media} book${media === 1 ? "" : "s"}/media not rated`);
       if (hidden) extras.push(`${hidden} promo${hidden === 1 ? "" : "s"} removed`);
       if (mode === "amazon") extras.push("Amazon's order");
       if (mode === "unit") extras.push("ordered by $/count");
@@ -1738,7 +2246,7 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
 
   function placeToggle() {
     if (document.getElementById("dsa-toggle")) return;
-    if (!document.querySelector(CARD_SEL)) return;
+    if (!document.querySelector(CARD_SEL) || isMediaSearch()) return;
     const toggle = buildToggle();
     const sidebar = document.querySelector("#s-refinements, #s-filters-content");
     if (sidebar) {
@@ -1759,16 +2267,27 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
     if (applying) return;
     clearTimeout(pending);
     pending = setTimeout(() => {
+      if (isMediaSearch()) { leaveMediaSearch(); return; }
       placeToggle();
       const input = document.querySelector("#dsa-toggle .dsa-main");
       if (input) input.checked = enabled;
       if (enabled) installSortOption();
-      if (enabled && cards().some(c => !c.dataset.dsaScored)) apply();
+      if (enabled && cards().some(c => !c.dataset.dsaScored && !isMedia(c))) apply();
       else if (enabled && CFG.hideClutter !== false && removeClutter() !== lastPromoCount) {
         lastPromoCount = promosRemoved;
         updateStatus(lastResults, currentMode(), promosRemoved);
       }
     }, 350);
+  }
+
+  // A search that turned into a media search (Amazon swapped the results in place): undo everything.
+  function leaveMediaSearch() {
+    const t = document.getElementById("dsa-toggle");
+    if (!t && !lastResults) return;
+    if (lastResults) restore();
+    removeSortOption();
+    if (t) t.remove();
+    lastResults = null;
   }
 
   // Clicking anywhere else closes an open badge.
@@ -1777,6 +2296,19 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
       document.querySelectorAll(".dsa-badge[open]").forEach(b => { b.open = false; });
     }
   });
+
+  // Remember which result you clicked through (left or middle click), so its product page can find
+  // the search-results estimate even when Amazon opens another size or colour.
+  const noteClick = e => {
+    if (!enabled || PRODUCT.isProductPage(location)) return;
+    const a = e.target.closest && e.target.closest("a[href]");
+    const card = a && a.closest(CARD_SEL);
+    if (!card || !card.dataset.asin || a.closest(".dsa-badge")) return;
+    lastClick = { a: card.dataset.asin, at: Date.now() };
+    storeSet(KEY_LAST_CLICK, lastClick);
+  };
+  document.addEventListener("click", noteClick, true);
+  document.addEventListener("auxclick", noteClick, true);
 
   console.info("[Disenshittify] running on this page");
   // v0.1 kept the on/off flag in amazon.com's own localStorage, where Amazon's scripts can see it.
@@ -1797,14 +2329,32 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
   }
 
   migrateOldSettings().then(() => Promise.all([storeGet(KEY_ENABLED, false), storeGet(KEY_MEMORY, null),
-    storeGet(KEY_SORT, null), storeGet(KEY_FEATURED_FOR, "")])).then(([on, mem, choice, featured]) => {
+    storeGet(KEY_SORT, null), storeGet(KEY_FEATURED_FOR, ""), storeGet(KEY_LISTINGS, {}), storeGet(KEY_LAST_CLICK, null)])).then(([on, mem, choice, featured, seen, clicked]) => {
+    lastClick = clicked && typeof clicked === "object" ? clicked : null;
     enabled = !!on;
     sortChoice = choice === "trust" || choice === "unit" ? choice : null;
     featuredFor = typeof featured === "string" ? featured : "";
     memory = MEMORY.sanitize(mem);
+    listings = seen && typeof seen === "object" ? seen : {};
     refreshLearned();
-    placeToggle();
-    if (enabled) { installSortOption(); apply(); }
+    if (PRODUCT.isProductPage(location)) {
+      // Picking another colour or size swaps the product in place (new ASIN in the address, no reload).
+      let lastPath = location.pathname;
+      let timer = null;
+      new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          const panelGone = enabled && !document.getElementById("dsa-product");
+          if (location.pathname !== lastPath || panelGone) { lastPath = location.pathname; runProductPage(false); }
+        }, 600);
+      }).observe(document.body, { childList: true, subtree: true });
+      runProductPage(false);
+      return;
+    }
+    if (!isMediaSearch()) {
+      placeToggle();
+      if (enabled) { installSortOption(); apply(); }
+    }
     new MutationObserver(onMutations).observe(document.body, { childList: true, subtree: true });
   });
 })();

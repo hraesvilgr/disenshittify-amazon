@@ -11,14 +11,18 @@ const fixture = require("./fixtures/baguette-tray.json");
 const userscript = fs.readFileSync(path.join(root, "dist", "disenshittify-amazon.user.js"), "utf8");
 const shotDir = process.argv[2];
 
-const { page, GM_SHIM } = require("./standin.js");
+const { page, GM_SHIM, productPage } = require("./standin.js");
+const products = require("./fixtures/products-2026-10-28.json");
 
 (async () => {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
   const errors = [];
   // Serve the stand-in page on an amazon.com URL so the @match and storage origin are realistic.
-  await ctx.route("https://www.amazon.com/**", r => r.fulfill({ contentType: "text/html", body: page }));
+  await ctx.route("https://www.amazon.com/**", r => {
+    const m = /\/dp\/([A-Z0-9]{10})/.exec(r.request().url());
+    r.fulfill({ contentType: "text/html", body: m && products[m[1]] ? productPage(products[m[1]]) : page });
+  });
   await ctx.route(/media-amazon\.com/, r => r.abort());
   const p = await ctx.newPage();
   p.on("pageerror", e => errors.push(e.message));
@@ -213,6 +217,102 @@ const { page, GM_SHIM } = require("./standin.js");
   check("Old site-storage setting is migrated and removed", (await p.evaluate(() => localStorage.getItem("dsaEnabled"))) === null &&
     (await status()) !== "Off");
   check("Nothing else written to amazon.com's own storage", (await p.evaluate(() => Object.keys(localStorage).filter(k => !k.startsWith("gm:")))).length === 0);
+
+  // 12. Product pages: a better rating, compared with the search-results estimate
+  await load("baguette tray");                                   // records the search-results estimates
+  const pavBefore = await p.$eval('[data-asin="B0D2NG692S"]', e => +e.querySelector(".dsa-score").textContent.replace(/\D/g, ""));
+  const cmBefore = await p.$eval('[data-asin="B003YKGQWO"]', e => +e.querySelector(".dsa-score").textContent.replace(/\D/g, ""));
+  const product = async asin => {
+    await p.goto("https://www.amazon.com/Some-Product-Name/dp/" + asin);
+    await p.evaluate(GM_SHIM);
+    await p.addScriptTag({ content: `(function(){${userscript}\n})();` });
+    await p.waitForSelector("#dsa-product");
+  };
+  await product("B0D2NG692S");
+  const pav = await p.textContent("#dsa-product");
+  check("Product page shows a Disenshittify panel under the title", await p.$eval("#dsa-product", e => e.previousElementSibling && e.previousElementSibling.id === "titleSection"));
+  check("…comparing with the search-results estimate", pav.includes(`Search results:`) && pav.includes(`· ${pavBefore}`), pav.slice(0, 140));
+  await p.click("#dsa-product .dsa-ph-details summary");
+  const pavDetails = await p.textContent("#dsa-product .dsa-ph-details");
+  check("…and listing what the product page showed", /bracketed/.test(pavDetails) && /Marketing language in bullet points/.test(pavDetails), pavDetails.slice(0, 160));
+  check("A score already at 0 shows no change, and says why", (await p.textContent("#dsa-product .dsa-ph-delta")) === "–" && /already at the bottom/.test(pav), pav.slice(0, 160));
+  check("Change sits right of the Trust pill; Disenshittify is right-aligned", await p.$eval("#dsa-product .dsa-ph-head", h => {
+    const [pill, d, t] = h.children; const hr = h.getBoundingClientRect(), pr = pill.getBoundingClientRect(), dr = d.getBoundingClientRect(), tr = t.getBoundingClientRect();
+    return d.classList.contains("dsa-ph-delta") && dr.left >= pr.right && dr.right < tr.left && hr.right - tr.right < 2; }));
+  check("No toggle box on product pages", !(await p.$("#dsa-toggle")));
+  if (shotDir) await p.screenshot({ path: path.join(shotDir, "6-product-junk.png"), clip: { x: 0, y: 0, width: 900, height: 420 } });
+  await product("B003YKGQWO");
+  const cmPanel = await p.textContent("#dsa-product");
+  check("Established brand's panel shows the check held up", /Search results:/.test(cmPanel) && /^(▲\d+|–)$/.test(await p.textContent("#dsa-product .dsa-ph-delta")), cmPanel.slice(0, 140));
+  if (shotDir) await p.screenshot({ path: path.join(shotDir, "7-product-good.png"), clip: { x: 0, y: 0, width: 900, height: 300 } });
+  await product("B0017CRZIK");
+  check("A product never seen in search results is rated from its own page", /Not in your recent search results/.test(await p.textContent("#dsa-product")));
+  check("…and still shows its change, against the title-only estimate", /^(▲\d+|▼\d+|–)$/.test(await p.textContent("#dsa-product .dsa-ph-delta")) &&
+    /title, stars and reviews alone \(\d+ → \d+\)/.test(await p.getAttribute("#dsa-product .dsa-ph-delta", "title")));
+  // Amazon opens another size/colour than the one clicked: the estimate is found through the swatches…
+  products.B0VARIANT1 = Object.assign({}, products.B003YKGQWO, { asin: "B0VARIANT1", variants: ["B0VARIANTX", "B003YKGQWO"] });
+  await product("B0VARIANT1");
+  const varPanel = await p.textContent("#dsa-product .dsa-ph-compare");
+  check("Another size/colour of a search result is compared with that result", varPanel.includes("another size/colour") && varPanel.includes(`· ${cmBefore}`), varPanel);
+  // …or through the result you last clicked, when the page has no swatches
+  products.B0VARIANT2 = Object.assign({}, products.B003YKGQWO, { asin: "B0VARIANT2" });
+  await p.goto("https://www.amazon.com/s?k=baguette+tray");
+  await p.evaluate(GM_SHIM);
+  await p.addScriptTag({ content: `(function(){${userscript}\n})();` });
+  await p.waitForSelector('[data-asin="B003YKGQWO"] .dsa-badge');
+  await p.$eval('[data-asin="B003YKGQWO"] h2 a, [data-asin="B003YKGQWO"] a[href]', a => { a.setAttribute("href", "#"); a.click(); });
+  await p.goto("https://www.amazon.com/dp/B0VARIANT2", { referer: "https://www.amazon.com/s?k=baguette+tray" });
+  await p.evaluate(GM_SHIM);
+  await p.addScriptTag({ content: `(function(){${userscript}\n})();` });
+  await p.waitForSelector("#dsa-product");
+  check("…or with the search result you clicked through", (await p.textContent("#dsa-product .dsa-ph-compare")).includes(`· ${cmBefore}`));
+  // Back on the results page, checked listings use the refined rating and say so
+  await load("baguette tray");
+  const pavAfter = await p.$eval('[data-asin="B0D2NG692S"] summary', e => e.textContent);
+  const cmAfter = await p.$eval('[data-asin="B003YKGQWO"] summary', e => e.textContent);
+  check("Checked listings are marked ✓ in the results", pavAfter.includes("✓") && cmAfter.includes("✓"), pavAfter + " | " + cmAfter);
+  await p.click('[data-asin="B0D2NG692S"] .dsa-badge summary');
+  check("…with the product-page check in the reasons", /Checked on its product page/.test(await p.textContent('[data-asin="B0D2NG692S"] .dsa-badge')));
+  // Books, films, TV, music and games: no Disenshittify at all
+  const mediaLoad = async (n) => {
+    await p.goto("https://www.amazon.com/s?k=baguette+tray&media=" + n);
+    await p.evaluate(n => [...document.querySelectorAll('div[data-component-type="s-search-result"]')].slice(0, n)
+      .forEach(c => { const a = document.createElement("a"); a.className = "a-text-bold"; a.textContent = "Paperback"; c.append(a); }), n);
+    await p.evaluate(GM_SHIM);
+    await p.addScriptTag({ content: `(function(){${userscript}\n})();` });
+    await p.waitForTimeout(700);
+  };
+  await mediaLoad(3);
+  const mixed = await p.evaluate(() => {
+    const cs = [...document.querySelectorAll('div[data-component-type="s-search-result"]')];
+    const media = cs.filter(c => [...c.querySelectorAll("a.a-text-bold")].some(a => a.textContent === "Paperback"));
+    return { toggle: !!document.getElementById("dsa-toggle"), mediaBadges: media.filter(c => c.querySelector(".dsa-badge")).length,
+             mediaPainted: media.filter(c => c.classList.contains("dsa-rated")).length, others: cs.filter(c => c.querySelector(".dsa-badge")).length,
+             last: media.every(c => cs.indexOf(c) >= cs.length - 3 - cs.filter(x => x.classList.contains("dsa-dupe")).length - 3),
+             status: (document.querySelector("#dsa-toggle .dsa-status") || {}).textContent || "" };
+  });
+  check("Mixed page: books get no badge or colour", mixed.toggle && mixed.mediaBadges === 0 && mixed.mediaPainted === 0 && mixed.others > 10, JSON.stringify(mixed));
+  check("…and the status line says so", /3 books\/media not rated/.test(mixed.status), mixed.status);
+  check("…and they keep Amazon's places in the trust order (a game searched for stays on top)", await p.evaluate(() =>
+    [...document.querySelectorAll('div[data-component-type="s-search-result"]')].slice(0, 3).every(c => [...c.querySelectorAll("a.a-text-bold")].some(a => a.textContent === "Paperback"))));
+  await mediaLoad(200);
+  check("Mostly-media search: no toggle, nothing rated, nothing removed", await p.evaluate(() =>
+    !document.getElementById("dsa-toggle") && !document.querySelector(".dsa-badge, .dsa-rated, .dsa-clutter")));
+  products["0441013597"] = Object.assign({}, products.B003YKGQWO, { asin: "0441013597", dpClass: "book en_US" });
+  await product("B003YKGQWO");
+  await p.goto("https://www.amazon.com/Dune/dp/0441013597");
+  await p.evaluate(GM_SHIM);
+  await p.addScriptTag({ content: `(function(){${userscript}\n})();` });
+  await p.waitForTimeout(800);
+  check("Book product page: no panel", !(await p.$("#dsa-product")));
+  await load("baguette tray");
+  // Turning Disenshittify off also turns off product pages
+  await p.click("#dsa-toggle .dsa-switch");
+  await p.goto("https://www.amazon.com/dp/B0002D00H8");
+  await p.evaluate(GM_SHIM);
+  await p.addScriptTag({ content: `(function(){${userscript}\n})();` });
+  await p.waitForTimeout(400);
+  check("Disenshittify off: no product-page panel", !(await p.$("#dsa-product")));
 
   check("No script errors", errors.length === 0, errors.slice(0, 3).join(" | "));
   await browser.close();

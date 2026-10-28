@@ -382,27 +382,27 @@
 
     // Reviews and rating
     const rc = l.reviewCount;
-    if (rc === 0 || rc == null && l.rating == null) add(reasons, W.noReviews, "No reviews");
+    if (rc === 0 || rc == null && l.rating == null) add(reasons, W.noReviews, "No reviews", "reviews");
     else if (rc != null) {
-      if (rc < 10) add(reasons, W.under10Reviews, `Only ${rc} review${rc === 1 ? "" : "s"}`);
-      else if (rc < 50) add(reasons, W.under50Reviews, `Few reviews (${rc})`);
-      else if (rc >= 3000) add(reasons, W.over3000Reviews, `Many reviews (${fmt(rc)})`);
-      else if (rc >= 1000) add(reasons, W.over1000Reviews, `Many reviews (${fmt(rc)})`);
-      else if (rc >= 200) add(reasons, W.over200Reviews, `Solid review count (${rc})`);
+      if (rc < 10) add(reasons, W.under10Reviews, `Only ${rc} review${rc === 1 ? "" : "s"}`, "reviews");
+      else if (rc < 50) add(reasons, W.under50Reviews, `Few reviews (${rc})`, "reviews");
+      else if (rc >= 3000) add(reasons, W.over3000Reviews, `Many reviews (${fmt(rc)})`, "reviews");
+      else if (rc >= 1000) add(reasons, W.over1000Reviews, `Many reviews (${fmt(rc)})`, "reviews");
+      else if (rc >= 200) add(reasons, W.over200Reviews, `Solid review count (${rc})`, "reviews");
       if (l.rating != null && l.rating >= 4.9 && rc > 0 && rc < 30) {
-        add(reasons, W.tooPerfect, `Near-perfect ${l.rating}★ on very few reviews`);
+        add(reasons, W.tooPerfect, `Near-perfect ${l.rating}★ on very few reviews`, "reviews");
       }
-      if (l.rating != null && l.rating < 4.0 && rc >= 20) add(reasons, W.lowRating, `Low rating (${l.rating}★)`);
+      if (l.rating != null && l.rating < 4.0 && rc >= 20) add(reasons, W.lowRating, `Low rating (${l.rating}★)`, "reviews");
     }
     if (l.newListing) add(reasons, W.newListing, "New on Amazon this month");
 
     // Listing age. Amazon hands out product IDs (ASINs) in sequence, so the ID dates the listing.
     // Throwaway sellers churn new listings; long-running products keep their old ones.
     const era = asinEra(l.asin);
-    if (era === "vintage") add(reasons, W.asinVintage, "Listed on Amazon for 10+ years");
-    else if (era === "old") add(reasons, W.asinOld, "Listed on Amazon since ~2015–2018");
-    else if (era === "recent") add(reasons, W.asinRecent, "Listed on Amazon since ~2018–2020");
-    else if (era === "new") add(reasons, W.asinNew, "Listing created in the last year or so");
+    if (era === "vintage") add(reasons, W.asinVintage, "Listed on Amazon for 10+ years", "age");
+    else if (era === "old") add(reasons, W.asinOld, "Listed on Amazon since ~2015–2018", "age");
+    else if (era === "recent") add(reasons, W.asinRecent, "Listed on Amazon since ~2018–2020", "age");
+    else if (era === "new") add(reasons, W.asinNew, "Listing created in the last year or so", "age");
 
     // Price far below the page median
     if (l.price && ctx.medianPrice && l.price < 0.45 * ctx.medianPrice) {

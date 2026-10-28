@@ -72,6 +72,23 @@ var DSA_CONFIG = {
     learnedBlocked: -20
   },
 
+  // Product-page signals (see src/product.js).
+  productWeights: {
+    veryNew: -8,            // listing under 3 months old (Date First Available)
+    manyOneStar: -6,        // 15%+ of reviews are 1-star
+    thinMiddle: -5,         // 85%+ 5-star but under 6% 4-star
+    soldByAmazon: 5,
+    anonymousSeller: -6,    // seller is a run-together trading-company registration
+    bulletBrackets: -6,     // 【BRACKETED】 bullet headings
+    bulletFlorid: -4,       // 3+ marketing phrases in the bullets
+    bulletServicePush: -4,  // "contact us", "risk-free", "100% satisfaction"…
+    bulletObfuscated: -10,  // "baguett-e", "safe-ty"
+    bulletWall: -6,         // bullets over 1,800 characters
+    bulletLong: -3,         // 1,300–1,800
+    bulletConcise: 3,       // under 600 characters
+    frequentlyReturned: -12
+  },
+
   // When a brand gets learned. "Evidence" is a listing's score with all brand points removed,
   // so a brand's own rating can't feed back into what's learned about it.
   learning: {
