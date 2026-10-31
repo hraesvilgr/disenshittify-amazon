@@ -12,6 +12,16 @@
   color: #0f1111;
 }
 #dsa-toggle.dsa-inline { max-width: 360px; margin: 8px 0 12px; }
+/* Floating at the top of the window once its place in the column has scrolled away */
+#dsa-toggle.dsa-float {
+  position: fixed;
+  top: 8px;
+  z-index: 300;
+  margin: 0;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
 
 .dsa-switch {
   display: flex;
@@ -235,3 +245,33 @@
 .dsa-ph-list li.dsa-good { color: #1e6b25; }
 .dsa-ph-list li.dsa-bad { color: #9b1c1c; }
 .dsa-product-error { --dsa-bg: #f3f3f3; --dsa-edge: #888; --dsa-ink: #565959; }
+
+/* "Found at MERCHANT for PRICE" box, to the right of the price */
+.dsa-found {
+  float: right;
+  clear: right;
+  width: 44%;
+  max-width: 220px;
+  margin: 0 0 6px 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #00aaff;
+  font: 12px/1.35 "Amazon Ember", Arial, sans-serif;
+  position: relative;
+  z-index: 2;
+}
+.dsa-found a { color: #0f1111 !important; text-decoration: none; }
+.dsa-found a:hover { text-decoration: underline; }
+.dsa-found .dsa-found-main { display: block; font-weight: 700; }
+.dsa-found .dsa-found-google { display: block; margin-top: 3px; font-size: 10.5px; text-decoration: underline; }
+
+/* "Scan for off-Amazon prices" */
+.dsa-scanbox { margin: 8px 0 0 50px; }
+.dsa-scan {
+  display: block; width: 100%; padding: 5px 8px; border: 1px solid #00aaff; border-radius: 6px;
+  background: #e6f6ff; color: #0f1111; font: 12px/1.3 "Amazon Ember", Arial, sans-serif; text-align: left; cursor: pointer;
+}
+.dsa-scan:hover:not(:disabled) { background: #ccecff; }
+.dsa-scan:disabled { cursor: progress; opacity: 0.8; }
+.dsa-scan-note { margin-top: 4px; font-size: 11px; color: #565959; }
+.dsa-scan-note:empty { display: none; }

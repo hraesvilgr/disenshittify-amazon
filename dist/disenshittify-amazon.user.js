@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Disenshittify Amazon
 // @namespace    disenshittify-amazon
-// @version      0.7.2
+// @version      0.9.3
 // @description  Rates Amazon search results by trustworthiness, tints them green to red, and sorts the junk to the bottom.
 // @match        https://www.amazon.com/s*
 // @match        https://amazon.com/s*
@@ -13,6 +13,12 @@
 // @match        https://amazon.com/gp/product/*
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_xmlhttpRequest
+// @grant        GM.getValue
+// @grant        GM.setValue
+// @grant        GM.xmlHttpRequest
+// @connect      api.upcitemdb.com
+// @inject-into  content
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==
@@ -20,7 +26,7 @@
 (function () {
   const style = document.createElement("style");
   style.id = "dsa-styles";
-  style.textContent = "/* Disenshittify Amazon \u2014 injected styles. Everything is prefixed dsa- to stay out of Amazon's way. */\n\n/* ---------- toggle ---------- */\n#dsa-toggle {\n  box-sizing: border-box;\n  margin: 0 0 14px;\n  padding: 10px 12px;\n  border: 2px solid #8bc34a;\n  border-radius: 10px;\n  background: #fbfdf7;\n  font-family: \"Amazon Ember\", Arial, sans-serif;\n  color: #0f1111;\n}\n#dsa-toggle.dsa-inline { max-width: 360px; margin: 8px 0 12px; }\n\n.dsa-switch {\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  cursor: pointer;\n  user-select: none;\n}\n.dsa-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }\n.dsa-track {\n  position: relative;\n  flex: none;\n  width: 40px;\n  height: 22px;\n  border-radius: 11px;\n  background: #b9bdbd;\n  transition: background 0.15s;\n}\n.dsa-thumb {\n  position: absolute;\n  top: 3px;\n  left: 3px;\n  width: 16px;\n  height: 16px;\n  border-radius: 50%;\n  background: #fff;\n  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);\n  transition: transform 0.15s;\n}\n.dsa-switch input:checked + .dsa-track { background: #2e7d32; }\n.dsa-switch input:checked + .dsa-track .dsa-thumb { transform: translateX(18px); }\n.dsa-switch input:focus-visible + .dsa-track { outline: 2px solid #007185; outline-offset: 2px; }\n.dsa-label { font-size: 16px; font-weight: 700; }\n.dsa-unit { margin-bottom: 6px; }\n\n.dsa-status { margin: 6px 0 0 50px; font-size: 12px; color: #565959; }\n.dsa-legend { margin: 8px 0 0 50px; }\n.dsa-legend span {\n  display: block;\n  height: 6px;\n  border-radius: 3px;\n  background: linear-gradient(90deg, hsl(120 70% 40%), hsl(60 70% 45%), hsl(0 70% 45%));\n}\n\n/* ---------- rated cards ---------- */\n.dsa-paint {\n  background: var(--dsa-bg) !important;\n  box-shadow: inset 6px 0 0 var(--dsa-edge) !important;\n  border-radius: 8px;\n}\n/* Amazon paints white boxes inside the card; let the tint show through. */\n.dsa-paint .a-section,\n.dsa-paint .s-card-border,\n.dsa-paint .puis-card-border,\n.dsa-paint .s-card-container,\n.dsa-paint .puis-padding-left-small {\n  background: transparent !important;\n}\n/* Keep product photos true to colour: a plain white box behind the image, no blending. */\n.dsa-paint .s-product-image-container {\n  background: #fff !important;\n  border-radius: 6px;\n}\n.dsa-paint .s-image { mix-blend-mode: normal !important; }\n\n.dsa-dupe { display: none !important; }\n\n/* ---------- trust badge: a small pill over the card's top-right corner ---------- */\n.dsa-rated { position: relative; }\n.dsa-rated:has(.dsa-badge[open]) { z-index: 60; }\n.dsa-wide [data-cy=\"title-recipe\"] { padding-right: 130px; }       /* open popover sits above neighbouring cards */\n.dsa-badge {\n  position: absolute;\n  top: 6px;\n  right: 6px;\n  z-index: 30;\n  font: 12px/1.35 \"Amazon Ember\", Arial, sans-serif;\n  color: var(--dsa-ink);\n  text-align: left;\n}\n.dsa-badge > summary {\n  display: inline-block;\n  padding: 2px 8px;\n  border-radius: 11px;\n  background: var(--dsa-edge);\n  color: #fff;\n  font-weight: 700;\n  white-space: nowrap;\n  cursor: pointer;\n  list-style: none;\n  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);\n}\n.dsa-badge > summary::-webkit-details-marker { display: none; }\n.dsa-badge > summary::marker { content: \"\"; }\n.dsa-badge > summary::after { content: \" \\25BE\"; font-weight: 400; }\n.dsa-badge[open] > summary::after { content: \" \\25B4\"; }\n.dsa-badge .dsa-score { font-weight: 400; opacity: 0.85; }\n.dsa-badge li { margin: 1px 0; white-space: pre-wrap; padding-left: 2.2em; text-indent: -2.2em; }\n.dsa-badge li.dsa-good { color: #1e6b25; }\n.dsa-badge li.dsa-bad { color: #9b1c1c; }\n\n/* ---------- brand buttons (badge + manager) ---------- */\n.dsa-badge-body {\n  position: absolute;\n  top: calc(100% + 4px);\n  right: 0;\n  width: 280px;\n  max-width: 80vw;\n  max-height: 60vh;\n  overflow-y: auto;\n  padding: 10px 12px;\n  border: 1px solid var(--dsa-edge);\n  border-radius: 8px;\n  background: #fff;\n  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);\n}\n\n.dsa-badge .dsa-badge-body ul { margin: 0; padding: 0; list-style: none; background: none; }\n.dsa-brandrow {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: center;\n  gap: 6px;\n  margin-top: 8px;\n  padding-top: 8px;\n  border-top: 1px solid rgba(0, 0, 0, 0.12);\n}\n.dsa-brandname { font-weight: 700; color: #0f1111; margin-right: auto; }\n.dsa-muted { color: #565959; font-size: 12px; }\n.dsa-btn {\n  font: 12px/1 \"Amazon Ember\", Arial, sans-serif;\n  padding: 5px 9px;\n  border: 1px solid #b9bdbd;\n  border-radius: 12px;\n  background: #fff;\n  color: #0f1111;\n  cursor: pointer;\n}\n.dsa-btn:hover { background: #f3f3f3; }\n.dsa-btn.dsa-trust { border-color: #2e7d32; color: #1e6b25; }\n.dsa-btn.dsa-block { border-color: #b71c1c; color: #9b1c1c; }\n.dsa-btn.dsa-on.dsa-trust { background: #2e7d32; color: #fff; }\n.dsa-btn.dsa-on.dsa-block { background: #b71c1c; color: #fff; }\n.dsa-btn.dsa-x { padding: 3px 8px; font-size: 14px; }\n.dsa-btn.dsa-reset { margin-left: auto; }\n\n.dsa-manage {\n  display: block;\n  margin: 8px 0 0 50px;\n  padding: 0;\n  border: 0;\n  background: none;\n  color: #007185;\n  font: 12px \"Amazon Ember\", Arial, sans-serif;\n  cursor: pointer;\n  text-align: left;\n}\n.dsa-manage:hover { text-decoration: underline; }\n.dsa-panel {\n  margin-top: 8px;\n  max-height: 360px;\n  overflow-y: auto;\n  font: 12px/1.4 \"Amazon Ember\", Arial, sans-serif;\n}\n.dsa-panel[hidden] { display: none; }\n.dsa-phead { margin: 8px 0 4px; font-weight: 700; font-size: 12px; }\n.dsa-plist { margin: 0; padding: 0; list-style: none; }\n.dsa-pitem {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: center;\n  gap: 4px 6px;\n  padding: 4px 0;\n  border-bottom: 1px solid #eee;\n}\n.dsa-pname { font-weight: 700; margin-right: auto; word-break: break-word; }\n.dsa-ptag { font-size: 11px; padding: 1px 6px; border-radius: 8px; color: #fff; }\n.dsa-ptag.dsa-trust { background: #2e7d32; }\n.dsa-ptag.dsa-block { background: #b71c1c; }\n.dsa-pactions { display: flex; gap: 4px; width: 100%; justify-content: flex-end; }\n.dsa-pitem .dsa-btn { padding: 3px 7px; font-size: 11px; }\n.dsa-pfoot { display: flex; align-items: center; gap: 6px; margin-top: 10px; }\n\n/* ---------- promos / ad blocks between results ---------- */\n.dsa-clutter,\n.dsa-stray-head { display: none !important; }\n\n/* ---------- product page panel ---------- */\n.dsa-checked { font-weight: 700; }\n.dsa-product {\n  margin: 8px 0 10px;\n  padding: 8px 12px 8px 14px;\n  border-radius: 8px;\n  background: var(--dsa-bg);\n  box-shadow: inset 6px 0 0 var(--dsa-edge);\n  font: 13px/1.4 \"Amazon Ember\", Arial, sans-serif;\n  color: #0f1111;\n}\n.dsa-ph-head { display: flex; align-items: center; gap: 8px; }\n.dsa-ph-pill {\n  padding: 2px 9px;\n  border-radius: 11px;\n  background: var(--dsa-edge);\n  color: #fff;\n  font-weight: 700;\n}\n.dsa-ph-title { font-weight: 700; color: var(--dsa-ink); margin-left: auto; }\n.dsa-ph-delta { font-weight: 700; font-size: 15px; cursor: help; }\n.dsa-ph-delta.dsa-up { color: #1e6b25; }\n.dsa-ph-delta.dsa-down { color: #9b1c1c; }\n.dsa-ph-delta.dsa-same { color: #565959; }\n.dsa-ph-compare { margin-top: 6px; }\n.dsa-delta { font-weight: 700; padding: 1px 6px; border-radius: 8px; }\n.dsa-delta.dsa-up { color: #1e6b25; background: rgba(46, 125, 50, 0.12); }\n.dsa-delta.dsa-down { color: #9b1c1c; background: rgba(183, 28, 28, 0.1); }\n.dsa-delta.dsa-same { color: #565959; background: rgba(0, 0, 0, 0.06); }\n.dsa-ph-details { margin-top: 6px; }\n.dsa-ph-details > summary { cursor: pointer; color: #007185; }\n.dsa-ph-list { margin: 6px 0; padding: 0; list-style: none; }\n.dsa-ph-list li { margin: 1px 0; padding-left: 2.6em; text-indent: -2.6em; }\n.dsa-ph-list li.dsa-good { color: #1e6b25; }\n.dsa-ph-list li.dsa-bad { color: #9b1c1c; }\n.dsa-product-error { --dsa-bg: #f3f3f3; --dsa-edge: #888; --dsa-ink: #565959; }\n";
+  style.textContent = "/* Disenshittify Amazon \u2014 injected styles. Everything is prefixed dsa- to stay out of Amazon's way. */\n\n/* ---------- toggle ---------- */\n#dsa-toggle {\n  box-sizing: border-box;\n  margin: 0 0 14px;\n  padding: 10px 12px;\n  border: 2px solid #8bc34a;\n  border-radius: 10px;\n  background: #fbfdf7;\n  font-family: \"Amazon Ember\", Arial, sans-serif;\n  color: #0f1111;\n}\n#dsa-toggle.dsa-inline { max-width: 360px; margin: 8px 0 12px; }\n/* Floating at the top of the window once its place in the column has scrolled away */\n#dsa-toggle.dsa-float {\n  position: fixed;\n  top: 8px;\n  z-index: 300;\n  margin: 0;\n  max-height: calc(100vh - 16px);\n  overflow-y: auto;\n  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);\n}\n\n.dsa-switch {\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  cursor: pointer;\n  user-select: none;\n}\n.dsa-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }\n.dsa-track {\n  position: relative;\n  flex: none;\n  width: 40px;\n  height: 22px;\n  border-radius: 11px;\n  background: #b9bdbd;\n  transition: background 0.15s;\n}\n.dsa-thumb {\n  position: absolute;\n  top: 3px;\n  left: 3px;\n  width: 16px;\n  height: 16px;\n  border-radius: 50%;\n  background: #fff;\n  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);\n  transition: transform 0.15s;\n}\n.dsa-switch input:checked + .dsa-track { background: #2e7d32; }\n.dsa-switch input:checked + .dsa-track .dsa-thumb { transform: translateX(18px); }\n.dsa-switch input:focus-visible + .dsa-track { outline: 2px solid #007185; outline-offset: 2px; }\n.dsa-label { font-size: 16px; font-weight: 700; }\n.dsa-unit { margin-bottom: 6px; }\n\n.dsa-status { margin: 6px 0 0 50px; font-size: 12px; color: #565959; }\n.dsa-legend { margin: 8px 0 0 50px; }\n.dsa-legend span {\n  display: block;\n  height: 6px;\n  border-radius: 3px;\n  background: linear-gradient(90deg, hsl(120 70% 40%), hsl(60 70% 45%), hsl(0 70% 45%));\n}\n\n/* ---------- rated cards ---------- */\n.dsa-paint {\n  background: var(--dsa-bg) !important;\n  box-shadow: inset 6px 0 0 var(--dsa-edge) !important;\n  border-radius: 8px;\n}\n/* Amazon paints white boxes inside the card; let the tint show through. */\n.dsa-paint .a-section,\n.dsa-paint .s-card-border,\n.dsa-paint .puis-card-border,\n.dsa-paint .s-card-container,\n.dsa-paint .puis-padding-left-small {\n  background: transparent !important;\n}\n/* Keep product photos true to colour: a plain white box behind the image, no blending. */\n.dsa-paint .s-product-image-container {\n  background: #fff !important;\n  border-radius: 6px;\n}\n.dsa-paint .s-image { mix-blend-mode: normal !important; }\n\n.dsa-dupe { display: none !important; }\n\n/* ---------- trust badge: a small pill over the card's top-right corner ---------- */\n.dsa-rated { position: relative; }\n.dsa-rated:has(.dsa-badge[open]) { z-index: 60; }\n.dsa-wide [data-cy=\"title-recipe\"] { padding-right: 130px; }       /* open popover sits above neighbouring cards */\n.dsa-badge {\n  position: absolute;\n  top: 6px;\n  right: 6px;\n  z-index: 30;\n  font: 12px/1.35 \"Amazon Ember\", Arial, sans-serif;\n  color: var(--dsa-ink);\n  text-align: left;\n}\n.dsa-badge > summary {\n  display: inline-block;\n  padding: 2px 8px;\n  border-radius: 11px;\n  background: var(--dsa-edge);\n  color: #fff;\n  font-weight: 700;\n  white-space: nowrap;\n  cursor: pointer;\n  list-style: none;\n  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);\n}\n.dsa-badge > summary::-webkit-details-marker { display: none; }\n.dsa-badge > summary::marker { content: \"\"; }\n.dsa-badge > summary::after { content: \" \\25BE\"; font-weight: 400; }\n.dsa-badge[open] > summary::after { content: \" \\25B4\"; }\n.dsa-badge .dsa-score { font-weight: 400; opacity: 0.85; }\n.dsa-badge li { margin: 1px 0; white-space: pre-wrap; padding-left: 2.2em; text-indent: -2.2em; }\n.dsa-badge li.dsa-good { color: #1e6b25; }\n.dsa-badge li.dsa-bad { color: #9b1c1c; }\n\n/* ---------- brand buttons (badge + manager) ---------- */\n.dsa-badge-body {\n  position: absolute;\n  top: calc(100% + 4px);\n  right: 0;\n  width: 280px;\n  max-width: 80vw;\n  max-height: 60vh;\n  overflow-y: auto;\n  padding: 10px 12px;\n  border: 1px solid var(--dsa-edge);\n  border-radius: 8px;\n  background: #fff;\n  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);\n}\n\n.dsa-badge .dsa-badge-body ul { margin: 0; padding: 0; list-style: none; background: none; }\n.dsa-brandrow {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: center;\n  gap: 6px;\n  margin-top: 8px;\n  padding-top: 8px;\n  border-top: 1px solid rgba(0, 0, 0, 0.12);\n}\n.dsa-brandname { font-weight: 700; color: #0f1111; margin-right: auto; }\n.dsa-muted { color: #565959; font-size: 12px; }\n.dsa-btn {\n  font: 12px/1 \"Amazon Ember\", Arial, sans-serif;\n  padding: 5px 9px;\n  border: 1px solid #b9bdbd;\n  border-radius: 12px;\n  background: #fff;\n  color: #0f1111;\n  cursor: pointer;\n}\n.dsa-btn:hover { background: #f3f3f3; }\n.dsa-btn.dsa-trust { border-color: #2e7d32; color: #1e6b25; }\n.dsa-btn.dsa-block { border-color: #b71c1c; color: #9b1c1c; }\n.dsa-btn.dsa-on.dsa-trust { background: #2e7d32; color: #fff; }\n.dsa-btn.dsa-on.dsa-block { background: #b71c1c; color: #fff; }\n.dsa-btn.dsa-x { padding: 3px 8px; font-size: 14px; }\n.dsa-btn.dsa-reset { margin-left: auto; }\n\n.dsa-manage {\n  display: block;\n  margin: 8px 0 0 50px;\n  padding: 0;\n  border: 0;\n  background: none;\n  color: #007185;\n  font: 12px \"Amazon Ember\", Arial, sans-serif;\n  cursor: pointer;\n  text-align: left;\n}\n.dsa-manage:hover { text-decoration: underline; }\n.dsa-panel {\n  margin-top: 8px;\n  max-height: 360px;\n  overflow-y: auto;\n  font: 12px/1.4 \"Amazon Ember\", Arial, sans-serif;\n}\n.dsa-panel[hidden] { display: none; }\n.dsa-phead { margin: 8px 0 4px; font-weight: 700; font-size: 12px; }\n.dsa-plist { margin: 0; padding: 0; list-style: none; }\n.dsa-pitem {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: center;\n  gap: 4px 6px;\n  padding: 4px 0;\n  border-bottom: 1px solid #eee;\n}\n.dsa-pname { font-weight: 700; margin-right: auto; word-break: break-word; }\n.dsa-ptag { font-size: 11px; padding: 1px 6px; border-radius: 8px; color: #fff; }\n.dsa-ptag.dsa-trust { background: #2e7d32; }\n.dsa-ptag.dsa-block { background: #b71c1c; }\n.dsa-pactions { display: flex; gap: 4px; width: 100%; justify-content: flex-end; }\n.dsa-pitem .dsa-btn { padding: 3px 7px; font-size: 11px; }\n.dsa-pfoot { display: flex; align-items: center; gap: 6px; margin-top: 10px; }\n\n/* ---------- promos / ad blocks between results ---------- */\n.dsa-clutter,\n.dsa-stray-head { display: none !important; }\n\n/* ---------- product page panel ---------- */\n.dsa-checked { font-weight: 700; }\n.dsa-product {\n  margin: 8px 0 10px;\n  padding: 8px 12px 8px 14px;\n  border-radius: 8px;\n  background: var(--dsa-bg);\n  box-shadow: inset 6px 0 0 var(--dsa-edge);\n  font: 13px/1.4 \"Amazon Ember\", Arial, sans-serif;\n  color: #0f1111;\n}\n.dsa-ph-head { display: flex; align-items: center; gap: 8px; }\n.dsa-ph-pill {\n  padding: 2px 9px;\n  border-radius: 11px;\n  background: var(--dsa-edge);\n  color: #fff;\n  font-weight: 700;\n}\n.dsa-ph-title { font-weight: 700; color: var(--dsa-ink); margin-left: auto; }\n.dsa-ph-delta { font-weight: 700; font-size: 15px; cursor: help; }\n.dsa-ph-delta.dsa-up { color: #1e6b25; }\n.dsa-ph-delta.dsa-down { color: #9b1c1c; }\n.dsa-ph-delta.dsa-same { color: #565959; }\n.dsa-ph-compare { margin-top: 6px; }\n.dsa-delta { font-weight: 700; padding: 1px 6px; border-radius: 8px; }\n.dsa-delta.dsa-up { color: #1e6b25; background: rgba(46, 125, 50, 0.12); }\n.dsa-delta.dsa-down { color: #9b1c1c; background: rgba(183, 28, 28, 0.1); }\n.dsa-delta.dsa-same { color: #565959; background: rgba(0, 0, 0, 0.06); }\n.dsa-ph-details { margin-top: 6px; }\n.dsa-ph-details > summary { cursor: pointer; color: #007185; }\n.dsa-ph-list { margin: 6px 0; padding: 0; list-style: none; }\n.dsa-ph-list li { margin: 1px 0; padding-left: 2.6em; text-indent: -2.6em; }\n.dsa-ph-list li.dsa-good { color: #1e6b25; }\n.dsa-ph-list li.dsa-bad { color: #9b1c1c; }\n.dsa-product-error { --dsa-bg: #f3f3f3; --dsa-edge: #888; --dsa-ink: #565959; }\n\n/* \"Found at MERCHANT for PRICE\" box, to the right of the price */\n.dsa-found {\n  float: right;\n  clear: right;\n  width: 44%;\n  max-width: 220px;\n  margin: 0 0 6px 8px;\n  padding: 6px 8px;\n  border-radius: 6px;\n  background: #00aaff;\n  font: 12px/1.35 \"Amazon Ember\", Arial, sans-serif;\n  position: relative;\n  z-index: 2;\n}\n.dsa-found a { color: #0f1111 !important; text-decoration: none; }\n.dsa-found a:hover { text-decoration: underline; }\n.dsa-found .dsa-found-main { display: block; font-weight: 700; }\n.dsa-found .dsa-found-google { display: block; margin-top: 3px; font-size: 10.5px; text-decoration: underline; }\n\n/* \"Scan for off-Amazon prices\" */\n.dsa-scanbox { margin: 8px 0 0 50px; }\n.dsa-scan {\n  display: block; width: 100%; padding: 5px 8px; border: 1px solid #00aaff; border-radius: 6px;\n  background: #e6f6ff; color: #0f1111; font: 12px/1.3 \"Amazon Ember\", Arial, sans-serif; text-align: left; cursor: pointer;\n}\n.dsa-scan:hover:not(:disabled) { background: #ccecff; }\n.dsa-scan:disabled { cursor: progress; opacity: 0.8; }\n.dsa-scan-note { margin-top: 4px; font-size: 11px; color: #565959; }\n.dsa-scan-note:empty { display: none; }\n";
   (document.head || document.documentElement).appendChild(style);
 })();
 
@@ -31,6 +37,17 @@
 globalThis.DSA_CONFIG = {
   // Hide promo / ad blocks between results (Haul carousels, brand banners, video ads\u2026) while on.
   hideClutter: true,
+
+  // "Scan for off-Amazon prices" (button in the Disenshittify box): looks up listings with a manufacturer
+  // model number on UPCitemdb's free plan and shows "Found at MERCHANT for PRICE". Userscript only.
+  priceCheck: {
+    enabled: true,
+    minPrice: 30,          // only listings over this price
+    searchLimit: 20,       // UPCitemdb's free plan: 100 requests a day, of which 20 can be searches
+    delayMs: 3000,         // between requests, one at a time
+    cacheHours: 72,        // results (found or not) are reused for this long
+    maxOfferAgeDays: 60    // ignore store prices UPCitemdb hasn't seen for longer than this
+  },
 
   // Brand lists live in src/brands.js. Learned brands and your own Trust/Block choices
   // are kept in browser storage (see src/memory.js).
@@ -1056,6 +1073,11 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
     return rows;
   }
 
+  // Desktop: #productTitle. Mobile site: <span id="title"> inside the title section.
+  function productTitle(doc) {
+    return T(doc.querySelector("#productTitle")) || T(doc.querySelector("#titleSection #title, #title_feature_div #title, h1#title"));
+  }
+
   function extractProduct(doc) {
     const q = s => doc.querySelector(s);
     const rows = detailRows(doc);
@@ -1079,13 +1101,20 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
       if (m && histogram[m[2]] === undefined) histogram[m[2]] = +m[1];
     }
 
-    const ratingM = /([\d.]+) out of 5/.exec((q("#acrPopover") && q("#acrPopover").getAttribute("title")) || T(q("#acrPopover")));
-    const countM = /([\d,]+)/.exec(T(q("#acrCustomerReviewText")));
+    // Desktop: #acrPopover title "4.4 out of 5 stars" + #acrCustomerReviewText "(2,764)".
+    // Mobile site: one link, "#acrCustomerReviewLink", reading "4.4 4.4 out of 5 stars (2,764)".
+    const mobileAcr = T(q("#acrCustomerReviewLink"));
+    const ratingM = /([\d.]+) out of 5/.exec((q("#acrPopover") && q("#acrPopover").getAttribute("title")) || T(q("#acrPopover")) || mobileAcr);
+    const countM = /([\d,]+)/.exec(T(q("#acrCustomerReviewText"))) || /\(([\d,]+)\)/.exec(mobileAcr);
 
     // Seller: "Ships from Amazon / Sold by Pavsrmy" boxes, or the older "Sold by X and Fulfilled by Amazon" line.
-    const feature = name => T(q(`[offer-display-feature-name="${name}"] .offer-display-feature-text-message`));
-    let soldBy = feature("desktop-merchant-info") || T(q("#sellerProfileTriggerId"));
-    let shipsFrom = feature("desktop-fulfiller-info");
+    // (The mobile site uses "mobile-\u2026" names, and puts the value in an offer-display-attribute-name element.)
+    const feature = name => T(q(`[offer-display-feature-name="desktop-${name}"] .offer-display-feature-text-message, ` +
+      `[offer-display-attribute-name="desktop-${name}"] .offer-display-feature-text-message, ` +
+      `[offer-display-attribute-name="mobile-${name}"] .offer-display-feature-text-message, ` +
+      `[offer-display-feature-name="mobile-${name}"] .offer-display-feature-text-message`));
+    let soldBy = feature("merchant-info") || T(q("#sellerProfileTriggerId"));
+    let shipsFrom = feature("fulfiller-info");
     const merchantLine = T(q("#merchant-info, #merchantInfo"));
     if (!soldBy) { const m = /Sold by (.+?)(?: and | \.|$)/i.exec(merchantLine); if (m) soldBy = m[1]; }
     if (!shipsFrom && /Fulfilled by Amazon|Ships from (and sold by )?Amazon/i.test(merchantLine)) shipsFrom = "Amazon";
@@ -1094,7 +1123,7 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
 
     return {
       asin,
-      title: T(q("#productTitle")),
+      title: productTitle(doc),
       brand: brand || null,
       bylineText,
       brandStore: /\/stores\//.test(bylineHref),
@@ -1303,9 +1332,133 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
   const GAME_TITLE = /[-\u2013(]\s*(PlayStation ?[45]|PS[45]|Xbox (Series [XS]|One)|Nintendo Switch( 2)?|Steam Deck|PC)\b/i;
   const GAME_HARDWARE = /\b(controllers?|gamepads?|game ?pads?|(joy|thumb|arcade|fight|fighting|flight|control) ?sticks?|joypads?|leverless|hitbox|hotas|throttle|steering|console|system|bundle|headsets?|headphones?|earbuds|speakers?|charg\w*|case|cables?|adapters?|receiver|dongle|stand|docks?|docking|grips?|skins?|triggers?|memory card|sd card|capture card|micro ?sd|ssd|hard drive|storage|mount|keyboard|mouse|mice|wheel|pedals?|joy-?cons?|amiibo|figure|remote|batter(y|ies)|cover|protector|accessor(y|ies)|camera|webcam|microphone|vr|fan|cooling|gift card|subscription|membership|renewed|\d+ ?(TB|GB))\b/i;
 
-  const api = { extractProduct, refineScore, parseDate, isProductPage, isAnonymousSeller, isMediaPage, isMediaCard };
+  const api = { extractProduct, productTitle, refineScore, parseDate, isProductPage, isAnonymousSeller, isMediaPage, isMediaCard };
   if (typeof module !== "undefined") module.exports = api;
   else root.DSA_PRODUCT = api;
+})(typeof globalThis !== "undefined" ? globalThis : this);
+
+;
+// ---- src/pricecheck.js ----
+// Disenshittify Amazon \u2014 "Found at MERCHANT for PRICE" (off-Amazon price scan, via UPCitemdb).
+// For a listing with a manufacturer model number, search UPCitemdb's product database for that brand +
+// model and look for a 100%-identical item: the same model number with nothing else bundled, sold new
+// and in stock by a US store other than Amazon or eBay, with a recently checked price. Pure functions;
+// the requests are made in content.js, only when you press "Scan for off-Amazon prices".
+
+(function (root) {
+  "use strict";
+
+  const T = el => el ? (el.textContent || "").replace(/\s+/g, " ").trim() : "";
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  // Units and specs that look like codes but aren't model numbers.
+  const NOT_MODEL = /^(\d+\s*-?\s*(FT|IN)-?LBS?|\d+-?(PORT|SPEED|PACK|PIECE|PC|PCS|IN-1|WAY|GANG|TON|PLY)|\d+(\.\d+)?(V|VOLTS?|AH|MAH|W|WATTS?|RPM|BPM|IPM|MM|CM|IN|INCH|FT|LBS?|NM|N\.M|PCS?|PK|PACK|GB|TB|MP|HZ|DB|OZ|ML|L|G|KG|PSI|CFM|GPM|AMP|AMPS|A)|\d+X\d+|[A-Z]?\d{1,3}V|V\d{1,3}|M\d{2}|USB\w*|LED\w*|MAX\w*|XR\w*|\d+(ST|ND|RD|TH))$/i;
+
+  // The manufacturer's model number: "(DCF787D1)", "(BDCI20C)", "3453-20", "DCF887B".
+  function modelFromTitle(title) {
+    const t = title || "";
+    for (const m of t.matchAll(/\(([A-Z0-9][A-Z0-9-]{3,20})\)/gi)) {
+      const c = m[1].toUpperCase();
+      if (/\d/.test(c) && /[A-Z]/.test(c) && !NOT_MODEL.test(c)) return c;
+      if (/^\d{4}-\d{2}$/.test(c)) return c;
+    }
+    const milwaukee = /\b(\d{4}-\d{2})\b/.exec(t);
+    if (milwaukee) return milwaukee[1];
+    for (const m of t.matchAll(/\b([A-Z]{2,}[A-Z0-9]*\d[A-Z0-9]*(?:-[A-Z0-9]+)?)\b/g)) {
+      const c = m[1];
+      if (c.length >= 5 && !NOT_MODEL.test(c)) return c;
+    }
+    return null;
+  }
+
+  // Other model numbers in a Google title that the Amazon title doesn't have mean something else is
+  // bundled in ("\u2026 W/ DCBL722B Handheld Blower", "DCB245-2C \u2026 W/ DCF787D1").
+  function otherCodes(title, model) {
+    const out = [];
+    for (const m of (title || "").matchAll(/\b([A-Z]{2,}[A-Z0-9]*\d[A-Z0-9]*(?:-[A-Z0-9]+)?|\d{2}-\d{2}-\d{3,5}|\d{4}-\d{2})\b/gi)) {
+      const c = m[1].toUpperCase();
+      if (c === model || c.startsWith(model + "-") || c.length < 5 || NOT_MODEL.test(c)) continue;
+      out.push(c);
+    }
+    return out;
+  }
+
+  // Is this listing the identical item? (With requireModel false, for a store's own title of an item
+  // already matched on its model number: only the bundle, part and kind checks apply.)
+  function isIdentical(gTitle, model, amazonTitle, requireModel) {
+    if (!gTitle || !model) return false;
+    // The exact model number, not a longer one ("DCF787D1" in "DCF787D1-DWAFE100SET" doesn't count;
+    // "dewalt-dcf787d1-impact-driver\u2026" does).
+    const re = new RegExp("(^|[^A-Z0-9])" + esc(model) + "(?![A-Z0-9])(?!-[A-Z0-9]*\\d)", "i");
+    if (requireModel !== false && !re.test(gTitle)) return false;
+    const amazonCodes = new Set(otherCodes(amazonTitle || "", model));
+    if (otherCodes(gTitle, model).some(c => !amazonCodes.has(c))) return false;
+    // Bundles, multi-packs and accessory sets.
+    const bundle = /\b(bundle|free\b|bonus|\d+\s*-?\s*(pc|pcs|piece)\b|accessor(y|ies)\s+(kit|set)|bit set|\d+\s*-?\s*(pack|pk)\b|pack of \d+|set of \d+|\(\d+\)|x\s?\d\b|personali[sz]ed|custom)/i;
+    if (bundle.test(gTitle) && !bundle.test(amazonTitle || "")) return false;
+    // Parts and accessories that mention the model: "Dewalt DCF850P1 Battery Replacement 4.0Ah",
+    // "Ryobi PCL235B Battery", "Charger for DCF787D1".
+    const a = amazonTitle || "";
+    if (PART_WORDS.test(gTitle) && !PART_WORDS.test(a)) return false;
+    if (new RegExp("\\b(for|fits?|with|w/)\\s+(the\\s+)?([A-Z+&-]+\\s+){0,2}" + esc(model) + "\\b", "i").test(gTitle)) return false;
+    // It has to be the same kind of thing: if the Amazon title names a tool, so must Google's.
+    const nouns = t => new Set((t.match(PRODUCT_NOUNS) || []).map(w => w.toLowerCase().replace(/s$/, "")));
+    const an = nouns(a), gn = nouns(gTitle);
+    if (an.size && ![...an].some(w => gn.has(w)) && !(gn.has("tool") || gn.has("kit"))) return false;
+    if (an.size && !gn.size && requireModel !== false) return false;
+    return true;
+  }
+  const PART_WORDS = /\b(replacement|compatible|for use with|fits|repair|spare|parts?\b|oem part|housing|brushes|decal|sticker|skin|holster|belt clip)/i;
+  const PRODUCT_NOUNS = /\b(drivers?|drills?|wrench(es)?|saws?|sanders?|grinders?|hammers?|nailers?|staplers?|routers?|planers?|vacuums?|blowers?|trimmers?|mowers?|guns?|tools?|kits?|combos?|multi-?tools?|lights?|radios?)\b/gi;
+
+  const SKIP_CONDITION = /(pre-?owned|\bused\b|refurbished|renewed|open box|reconditioned|for parts|wholesale)/i;
+  // Amazon itself, auction and resale marketplaces, pawn and liquidation shops: not a like-for-like new item.
+  const SKIP_MERCHANT = /^(amazon|ebay)\b|etsy|alibaba|aliexpress|temu|\bwish\b|mercari|poshmark|offerup|facebook|craigslist|walmart - seller|pawn|paymore|liquidat|surplus|thrift|resale|second ?hand|cash ?converters|backmarket|back market/i;
+
+  function priceValue(s) {
+    if (typeof s === "number") return s;
+    const m = /\$\s?([\d,]+(?:\.\d{2})?)/.exec(s || "");
+    return m ? parseFloat(m[1].replace(/,/g, "")) : null;
+  }
+
+  const norm = s => (s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  // Stores outside the US (prices in other currencies): walmart.ca, *.co.uk, \u2026
+  const FOREIGN = /\.(ca|uk|au|de|fr|it|es|nl|mx|jp|in|ie|nz|eu|cn|br)$/i;
+
+  // UPCitemdb search response \u2192 the cheapest identical offer, or null.
+  // items[].model / items[].title identify the product; items[].offers[] are stores' prices.
+  function pickOffer(json, model, amazonTitle, now, maxAgeDays) {
+    const items = (json && json.items) || [];
+    const cutoff = (now || Date.now()) / 1000 - (maxAgeDays || 60) * 86400;
+    const offers = [];
+    for (const it of items) {
+      const sameModel = norm(it.model) === norm(model) || isIdentical(it.title || "", model, amazonTitle);
+      if (!sameModel || !isIdentical(it.title || "", model, amazonTitle, false)) continue;
+      for (const o of it.offers || []) {
+        const price = priceValue(o.price);
+        if (!price || !o.link || !/^https?:\/\//.test(o.link)) continue;
+        if (o.currency && o.currency !== "USD") continue;
+        if (FOREIGN.test(o.domain || "")) continue;
+        if (o.condition && !/^new$/i.test(o.condition)) continue;
+        if (/out of stock|unavailable|discontinued/i.test(o.availability || "")) continue;
+        if (o.updated_t && o.updated_t < cutoff) continue;
+        if (SKIP_MERCHANT.test(o.merchant || "") || SKIP_MERCHANT.test(o.domain || "")) continue;
+        if (o.title && !isIdentical(o.title, model, amazonTitle, false)) continue;
+        offers.push({ m: (o.merchant || o.domain || "").replace(/^Wal-Mart\.com$/i, "Walmart"), p: "$" + price.toFixed(2), price, u: o.link, at: o.updated_t || null });
+      }
+    }
+    offers.sort((a, b) => a.price - b.price);
+    return offers[0] || null;
+  }
+
+  function searchUrl(query) {
+    return "https://api.upcitemdb.com/prod/trial/search?s=" + encodeURIComponent(query) + "&match_mode=0&type=product";
+  }
+  function shoppingUrl(query) { return "https://www.google.com/search?udm=28&q=" + encodeURIComponent(query); }
+
+  const api = { modelFromTitle, otherCodes, isIdentical, pickOffer, searchUrl, shoppingUrl, priceValue };
+  if (typeof module !== "undefined") module.exports = api;
+  else root.DSA_PRICECHECK = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
 
 ;
@@ -1325,13 +1478,16 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
   const SCORER = globalThis.DSA_SCORER;
   const MEMORY = globalThis.DSA_MEMORY;
   const PRODUCT = globalThis.DSA_PRODUCT;
+  const PRICECHECK = globalThis.DSA_PRICECHECK;
   const CARD_SEL = 'div[data-component-type="s-search-result"]';
   const KEY_ENABLED = "dsaEnabled";
   const KEY_SORT = "dsaSort";                 // "trust" | "unit" | null (Amazon's own sort)
   const KEY_FEATURED_FOR = "dsaFeaturedFor";  // search where you picked Amazon's raw "Featured"
   const KEY_OLD_UNIT_SORT = "dsaUnitSort";    // v0.4.x
-  const KEY_LISTINGS = "dsaListings";
-  const KEY_LAST_CLICK = "dsaLastClick";      // the search result you last clicked through: {a: ASIN, at}         // per-ASIN: search-results estimate + product-page check
+  const KEY_LISTINGS = "dsaListings";         // per-ASIN: search-results estimate + product-page check
+  const KEY_LAST_CLICK = "dsaLastClick";      // the search result you last clicked through: {a: ASIN, at}
+  const KEY_PRICES = "dsaOffPrices";          // off-Amazon price scans: query \u2192 { at, f: {m, p, u, at} | 0 }
+  const KEY_PRICE_USAGE = "dsaUpcUsage";      // UPCitemdb free-plan use today: { used, limit, resetAt }
   const LISTINGS_MAX = 300;                   // most recently seen listings kept
   const CHECK_TTL = 30 * 864e5;               // product-page checks are reused for 30 days
   const KEY_MEMORY = "dsaMemory";
@@ -1355,8 +1511,13 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
   // Extension storage as an add-on; Tampermonkey/Violentmonkey storage as a userscript;
   // localStorage as a last resort. Values are stored as plain JSON-able objects.
 
-  const hasExtStorage = !!(ext && ext.storage && ext.storage.local);
+  // As a userscript, the manager's storage always wins: GM_getValue/GM_setValue (Tampermonkey,
+  // Violentmonkey) or GM.getValue/GM.setValue (Greasemonkey 4). Some managers run scripts where an
+  // extension API object is visible too; that storage belongs to the manager, not to this script.
   const hasGM = typeof GM_getValue === "function" && typeof GM_setValue === "function";
+  const GM4 = typeof GM !== "undefined" && GM && typeof GM.getValue === "function" && typeof GM.setValue === "function" ? GM : null;
+  const isUserscript = hasGM || !!GM4 || typeof GM_info !== "undefined";
+  const hasExtStorage = !isUserscript && !!(ext && ext.storage && ext.storage.local);
 
   async function storeGet(key, fallback) {
     try {
@@ -1364,10 +1525,13 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
         const r = await ext.storage.local.get(key);
         return r && key in r ? r[key] : fallback;
       }
-      if (hasGM) {
+      if (hasGM || GM4) {
         // Private script storage only; amazon.com's own localStorage is never read or written here.
-        const v = await GM_getValue(key, undefined);
-        return v === undefined ? fallback : v;
+        // (Greasemonkey 4 stores only strings, numbers and booleans, so objects go in as JSON there.)
+        const v = hasGM ? await GM_getValue(key, undefined) : await GM4.getValue(key, undefined);
+        if (v === undefined) return fallback;
+        if (!hasGM && typeof v === "string" && v.startsWith("\u0001")) return JSON.parse(v.slice(1));
+        return v;
       }
       const raw = localStorage.getItem(key);
       if (raw == null) return fallback;
@@ -1382,6 +1546,7 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
     try {
       if (hasExtStorage) return ext.storage.local.set({ [key]: value });
       if (hasGM) return GM_setValue(key, value);
+      if (GM4) return GM4.setValue(key, value !== null && typeof value === "object" ? "\u0001" + JSON.stringify(value) : value);
       localStorage.setItem(key, JSON.stringify(value));
     } catch (e) { /* storage full or blocked \u2014 carry on without saving */ }
   }
@@ -1610,7 +1775,7 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
     delete card.dataset.dsaTier;
     delete card.dataset.dsaUnit;
     card.classList.remove("dsa-rated", "dsa-dupe", "dsa-wide");
-    card.querySelectorAll(".dsa-badge").forEach(b => b.remove());
+    card.querySelectorAll(".dsa-badge, .dsa-found").forEach(b => b.remove());
     card.querySelectorAll(".dsa-paint").forEach(t => t.classList.remove("dsa-paint"));
     if (card.classList.contains("dsa-paint")) card.classList.remove("dsa-paint");
   }
@@ -1749,7 +1914,7 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
     const old = document.getElementById("dsa-product");
     if (!enabled) { if (old) old.remove(); return; }
     const anchor = document.querySelector("#titleSection, #title_feature_div, #title");
-    if (!anchor || !document.querySelector("#productTitle")) return;
+    if (!anchor || !PRODUCT.productTitle(document)) return;
     if (PRODUCT.isMediaPage(document)) { if (old) old.remove(); return; }   // books, films, TV, music, games
     try {
       const product = PRODUCT.extractProduct(document);
@@ -1779,6 +1944,219 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
         el("div", { class: "dsa-ph-compare" }, "Couldn't rate this page: " + (e && e.message || e)));
       if (old) old.replaceWith(panel); else anchor.insertAdjacentElement("afterend", panel);
     }
+  }
+
+  // ---------- "Found at MERCHANT for PRICE" (off-Amazon price scan, UPCitemdb) ----------
+  // Nothing is looked up automatically. "Scan for off-Amazon prices" in the Disenshittify box looks up
+  // listings anywhere on Amazon that have a manufacturer model number and cost over $30, one at a time,
+  // on UPCitemdb's free plan (100 requests a day per connection, no sign-up), as they scroll into view,
+  // and shows the cheapest identical item sold new elsewhere. Results are kept for 72 hours.
+  // Userscript only (GM_xmlhttpRequest).
+
+  const PC = CFG.priceCheck || {};
+  const xhr = typeof GM_xmlhttpRequest === "function" ? GM_xmlhttpRequest
+    : typeof GM !== "undefined" && GM && typeof GM.xmlHttpRequest === "function" ? o => GM.xmlHttpRequest(o) : null;   // Greasemonkey 4
+  const canFetch = !!xhr;
+  let prices = {};
+  let usage = { used: 0, limit: 100, resetAt: 0 };
+  let scanning = false;
+  let scanNote = "";
+  const pqByQ = new Map();
+
+  function priceAvailable() { return !!(PC.enabled && canFetch && PRICECHECK); }
+
+  function gmGet(url) {
+    return new Promise(resolve => {
+      xhr({
+        method: "GET", url, timeout: 20000, headers: { Accept: "application/json" },
+        onload: r => resolve({ status: r.status, headers: r.responseHeaders || "", text: r.responseText || "" }),
+        onerror: () => resolve({ status: 0, headers: "", text: "" }),
+        ontimeout: () => resolve({ status: 0, headers: "", text: "" })
+      });
+    });
+  }
+  const header = (h, name) => { const m = new RegExp("^" + name + ":\\s*(.+)$", "im").exec(h); return m ? m[1].trim() : null; };
+
+  // Today's use of the free plan, from UPCitemdb's own rate-limit headers.
+  function usedToday() {
+    if (usage.resetAt && Date.now() > usage.resetAt) usage = { used: 0, limit: usage.limit || 100, resetAt: 0 };
+    return usage;
+  }
+  function noteUsage(res) {
+    const limit = parseInt(header(res.headers, "X-RateLimit-Limit"), 10);
+    const remaining = parseInt(header(res.headers, "X-RateLimit-Remaining"), 10);
+    const reset = parseInt(header(res.headers, "X-RateLimit-Reset"), 10);
+    if (!isNaN(limit) && !isNaN(remaining)) usage = { used: Math.max(0, limit - remaining), limit, resetAt: !isNaN(reset) ? reset * 1000 : usage.resetAt };
+    else usage = { used: usedToday().used + 1, limit: usage.limit || 100, resetAt: usage.resetAt || Date.now() + 864e5 };
+    storeSet(KEY_PRICE_USAGE, usage);
+  }
+
+  function priceQuery(raw, result) {
+    const price = PRICECHECK.priceValue(raw.price);
+    if (price == null || price <= (PC.minPrice || 0)) return null;
+    const title = (result.listing && result.listing.title) || raw.title.replace(/^sponsored( ad)?\s*[-\u2013:]\s*/i, "");
+    const model = PRICECHECK.modelFromTitle(title);
+    if (!model) return null;
+    let brand = (result.brand && result.brand.name) || raw.brandLine || "";
+    // Spell the brand the way the listing does ("DEWALT", not the brand list's "DeWalt").
+    if (brand && title.toUpperCase().startsWith(brand.toUpperCase())) brand = title.slice(0, brand.length);
+    const q = (brand && !model.toUpperCase().includes(brand.toUpperCase()) ? brand + " " : "") + model;
+    return { q, model, title };
+  }
+
+  function renderFound(card, q, f) {
+    card.querySelectorAll(".dsa-found").forEach(n => n.remove());
+    if (!f || !f.u) return;   // nothing identical found: leave the card exactly as it is
+    const recipe = card.querySelector('[data-cy="price-recipe"]') ||
+      (card.querySelector(".a-price") && card.querySelector(".a-price").parentElement);
+    if (!recipe) return;
+    const when = f.at ? new Date(f.at * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
+    const box = el("div", { class: "dsa-found" },
+      el("a", { class: "dsa-found-main", href: f.u, target: "_blank", rel: "noopener noreferrer nofollow",
+        title: `Price seen ${when ? "on " + when + " " : ""}by UPCitemdb; check the store's page for today's price` },
+        `Found at ${f.m} for ${f.p}`),
+      el("a", { class: "dsa-found-google", href: PRICECHECK.shoppingUrl(q), target: "_blank", rel: "noopener noreferrer" },
+        "View Google Shopping results"));
+    box.addEventListener("click", e => e.stopPropagation());
+    recipe.insertBefore(box, recipe.firstChild);
+  }
+
+  function renderPriceFor(q) {
+    const hit = prices[q];
+    for (const card of cards()) if (card.dataset.dsaPriceQ === q) renderFound(card, q, hit && hit.f);
+  }
+
+  // On every scoring pass: note which listings can be scanned, and show results already in hand.
+  function preparePriceChecks(rated, raws, results) {
+    if (!priceAvailable()) return;
+    rated.forEach((card, i) => {
+      const pq = priceQuery(raws[i], results.get(i));
+      if (!pq) { delete card.dataset.dsaPriceQ; return; }
+      card.dataset.dsaPriceQ = pq.q;
+      pqByQ.set(pq.q, pq);
+      if (priceFresh(pq.q)) renderFound(card, pq.q, prices[pq.q].f);
+      watchForScan(card);
+    });
+    updateScanButton();
+  }
+
+  // Scanning is switched on with the button and then follows your scrolling: each listing is looked up
+  // when it comes into view, so results you never reach cost nothing. One request per listing.
+  let scanOn = false;
+  const scanQueue = [];
+  const scanQueued = new Set();
+  const scanTally = { found: 0, none: 0 };
+  const priceFresh = q => { const hit = prices[q]; return hit && Date.now() - hit.at < (PC.cacheHours || 72) * 36e5; };
+
+  const scanObserver = typeof IntersectionObserver === "function" ? new IntersectionObserver(entries => {
+    if (!scanOn) return;
+    for (const e of entries) if (e.isIntersecting) queueCard(e.target);
+    runScan();
+  }, { threshold: 0.4 }) : null;
+
+  function watchForScan(card) { if (scanObserver && card.dataset.dsaPriceQ) scanObserver.observe(card); }
+
+  function queueCard(card) {
+    const q = card.dataset.dsaPriceQ;
+    if (!q || card.classList.contains("dsa-dupe") || scanQueued.has(q) || priceFresh(q)) return;
+    scanQueued.add(q);
+    scanQueue.push(q);
+  }
+
+  function inView(card) {
+    const r = card.getBoundingClientRect();
+    return r.bottom > 0 && r.top < (window.innerHeight || document.documentElement.clientHeight) && r.width > 0;
+  }
+
+  function updateScanButton() {
+    const btn = document.querySelector("#dsa-toggle .dsa-scan");
+    const note = document.querySelector("#dsa-toggle .dsa-scan-note");
+    if (!btn) return;
+    const box = btn.parentElement;
+    box.hidden = !enabled || !priceAvailable();
+    const u = usedToday();
+    // The free plan allows 100 requests a day, but only 20 of them can be searches, and every scan
+    // request is a search, so count against 20.
+    const cap = PC.searchLimit || 20;
+    btn.textContent = (scanOn ? "Stop scanning for off-Amazon prices" : "Scan for off-Amazon prices") + `: ${Math.min(u.used, cap)}/${cap} used so far today`;
+    btn.setAttribute("aria-pressed", scanOn ? "true" : "false");
+    if (note) note.textContent = scanNote;
+  }
+
+  function scanPrices() {
+    if (!priceAvailable()) return;
+    if (scanOn) { scanOn = false; scanQueue.length = 0; scanQueued.clear(); scanNote = scanSummary("Stopped."); updateScanButton(); return; }
+    const eligible = cards().filter(c => c.dataset.dsaPriceQ && !c.classList.contains("dsa-dupe"));
+    if (!eligible.length) {
+      scanNote = "No listings here have a manufacturer model number and a price over $" + (PC.minPrice || 0) + ".";
+      updateScanButton();
+      return;
+    }
+    scanOn = true;
+    scanTally.found = scanTally.none = 0;
+    eligible.filter(inView).forEach(queueCard);
+    scanNote = scanQueue.length ? "" : "Listings in view are already checked. Scroll to check more.";
+    updateScanButton();
+    runScan();
+  }
+
+  function scanSummary(prefix) {
+    const n = scanTally.found + scanTally.none;
+    return (prefix ? prefix + " " : "") + (n ? `Checked ${n}: found ${scanTally.found} elsewhere, ${scanTally.none} not found.` : "");
+  }
+
+  async function runScan() {
+    if (scanning) return;
+    scanning = true;
+    try {
+      while (scanOn && enabled && scanQueue.length) {
+        const q = scanQueue.shift();
+        const pq = pqByQ.get(q);
+        if (!pq || priceFresh(q)) continue;
+        scanNote = `Checking ${q}\u2026` + (scanQueue.length ? ` (${scanQueue.length} more in view)` : "");
+        updateScanButton();
+        let res = await gmGet(PRICECHECK.searchUrl(q));
+        noteUsage(res);
+        if (res.status === 429 && /TOO_FAST/i.test(res.text)) {   // too many in a short burst: wait and retry once
+          await new Promise(r => setTimeout(r, 31000));
+          res = await gmGet(PRICECHECK.searchUrl(q));
+          noteUsage(res);
+        }
+        if (res.status === 429) {
+          const after = parseInt(header(res.headers, "Retry-After"), 10);
+          if (!isNaN(after)) usage.resetAt = Date.now() + after * 1000;
+          usage.used = Math.max(usage.limit, PC.searchLimit || 20); storeSet(KEY_PRICE_USAGE, usage);
+          scanOn = false; scanQueue.length = 0; scanQueued.clear();
+          scanNote = scanSummary(`UPCitemdb's free daily limit is used up${!isNaN(after) ? ` (resets in about ${Math.ceil(after / 3600)} h)` : ""}.`);
+          console.info("[Disenshittify] price scan: daily limit reached", res.text.slice(0, 200));
+          break;
+        }
+        let json = null;
+        try { json = JSON.parse(res.text); } catch (e) { /* not JSON */ }
+        if (res.status !== 200 || !json || json.code !== "OK") {
+          scanQueued.delete(q);   // try again if it comes back into view
+          console.info(`[Disenshittify] price scan: ${q} \u2014 no answer (HTTP ${res.status}${json && json.code ? ", " + json.code : ""})`);
+        } else {
+          const f = PRICECHECK.pickOffer(json, pq.model, pq.title, Date.now(), PC.maxOfferAgeDays || 60);
+          prices[q] = { at: Date.now(), f: f ? { m: f.m, p: f.p, u: f.u, at: f.at } : 0 };
+          if (f) scanTally.found++; else scanTally.none++;
+          console.info(`[Disenshittify] price scan: ${q} \u2014 ${(json.items || []).length} products; ` + (f ? `cheapest identical: ${f.m} ${f.p}` : "no identical item sold new elsewhere"));
+          renderPriceFor(q);
+          savePrices();
+        }
+        if (scanQueue.length) await new Promise(r => setTimeout(r, PC.delayMs || 3000));
+      }
+      if (scanOn) scanNote = scanSummary("") + (scanSummary("") ? " " : "") + "Scroll to check more.";
+    } finally {
+      scanning = false;
+      updateScanButton();
+    }
+  }
+
+  function savePrices() {
+    const keys = Object.keys(prices);
+    if (keys.length > 500) keys.sort((a, b) => prices[a].at - prices[b].at).slice(0, keys.length - 500).forEach(k => delete prices[k]);
+    storeSet(KEY_PRICES, prices);
   }
 
   // ---------- promos and ad blocks ----------
@@ -1923,6 +2301,7 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
         if (/^More results/i.test((node.innerText || node.textContent || "").trim())) node.classList.toggle("dsa-stray-head", mode !== "amazon");
       }
 
+      preparePriceChecks(rated, raws, results);
       const hidden = CFG.hideClutter === false ? 0 : removeClutter();
       lastResults = results;
       lastPromoCount = promosRemoved;
@@ -2228,6 +2607,7 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
       enabled = input.checked;
       storeSet(KEY_ENABLED, enabled);
       if (enabled) { installSortOption(); apply(); } else { removeSortOption(); restore(); }
+      updateScanButton();
     });
     const wrap = el("div", { id: "dsa-toggle" },
       el("label", { class: "dsa-switch" },
@@ -2236,6 +2616,9 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
         el("span", { class: "dsa-label" }, "Disenshittify")),
       el("div", { class: "dsa-status" }, "Off"),
       el("div", { class: "dsa-legend", "aria-hidden": "true" }, el("span")),
+      el("div", { class: "dsa-scanbox", hidden: "" },
+        el("button", { type: "button", class: "dsa-scan", on: { click: e => { e.preventDefault(); scanPrices(); } } }, "Scan for off-Amazon prices"),
+        el("div", { class: "dsa-scan-note" })),
       el("button", {
         type: "button", class: "dsa-manage",
         on: { click: e => { e.preventDefault(); panelOpen = !panelOpen; renderPanel(); } }
@@ -2258,6 +2641,37 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
       slot.parentElement.insertBefore(toggle, slot);
     }
     updateStatus(null);
+    updateScanButton();
+    floatToggle(toggle);
+  }
+
+  // Keep the Disenshittify box in view: once its place in the column scrolls off the top of the
+  // window, it floats at the top of the window over the filter column (same position and width),
+  // and settles back into place when you scroll up again.
+  function floatToggle(toggle) {
+    if (typeof IntersectionObserver !== "function") return;
+    const spot = el("div", { class: "dsa-spot" });
+    toggle.parentElement.insertBefore(spot, toggle);
+    const place = () => {
+      if (!toggle.classList.contains("dsa-float")) return;
+      const r = spot.getBoundingClientRect();
+      toggle.style.left = r.left + "px";
+      toggle.style.width = r.width + "px";
+    };
+    new IntersectionObserver(([e]) => {
+      const off = !e.isIntersecting && e.boundingClientRect.top < 0;
+      if (off === toggle.classList.contains("dsa-float")) return;
+      if (off) {
+        spot.style.height = toggle.offsetHeight + "px";
+        toggle.classList.add("dsa-float");
+        place();
+      } else {
+        toggle.classList.remove("dsa-float");
+        toggle.style.left = toggle.style.width = "";
+        spot.style.height = "";
+      }
+    }, { threshold: 0 }).observe(spot);
+    window.addEventListener("resize", place, { passive: true });
   }
 
   // ---------- keep up with Amazon's in-page updates ----------
@@ -2303,18 +2717,20 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
     if (!enabled || PRODUCT.isProductPage(location)) return;
     const a = e.target.closest && e.target.closest("a[href]");
     const card = a && a.closest(CARD_SEL);
-    if (!card || !card.dataset.asin || a.closest(".dsa-badge")) return;
+    if (!card || !card.dataset.asin || a.closest(".dsa-badge, .dsa-found")) return;
     lastClick = { a: card.dataset.asin, at: Date.now() };
     storeSet(KEY_LAST_CLICK, lastClick);
   };
   document.addEventListener("click", noteClick, true);
   document.addEventListener("auxclick", noteClick, true);
 
-  console.info("[Disenshittify] running on this page");
+  const INFO = typeof GM_info !== "undefined" ? GM_info : typeof GM !== "undefined" && GM && GM.info ? GM.info : null;
+  console.info("[Disenshittify] running on this page (v" + ((INFO && INFO.script && INFO.script.version) || "add-on") +
+    (INFO ? ", " + (INFO.scriptHandler || "userscript manager") + (INFO.injectInto ? ", " + INFO.injectInto + " mode" : "") : "") + ")");
   // v0.1 kept the on/off flag in amazon.com's own localStorage, where Amazon's scripts can see it.
   // Move it into the script's private storage and delete it from the site.
   async function migrateOldSettings() {
-    if (!hasExtStorage && !hasGM) return;
+    if (!hasExtStorage && !hasGM && !GM4) return;
     try {
       const old = localStorage.getItem(KEY_ENABLED);
       if (old !== null) {
@@ -2326,10 +2742,14 @@ if (typeof module !== 'undefined') module.exports = DSA_BIGRAMS;
       storeSet(KEY_SORT, "unit");
     }
     storeSet(KEY_OLD_UNIT_SORT, false);
+    for (const old of ["dsaPrices", "dsaPrices2", "dsaPrices3", "dsaPricePause"]) if ((await storeGet(old, null)) !== null) storeSet(old, null);   // v0.8.0\u20130.8.5 Google price checks
   }
 
   migrateOldSettings().then(() => Promise.all([storeGet(KEY_ENABLED, false), storeGet(KEY_MEMORY, null),
-    storeGet(KEY_SORT, null), storeGet(KEY_FEATURED_FOR, ""), storeGet(KEY_LISTINGS, {}), storeGet(KEY_LAST_CLICK, null)])).then(([on, mem, choice, featured, seen, clicked]) => {
+    storeGet(KEY_SORT, null), storeGet(KEY_FEATURED_FOR, ""), storeGet(KEY_LISTINGS, {}), storeGet(KEY_LAST_CLICK, null), storeGet(KEY_PRICES, {}), storeGet(KEY_PRICE_USAGE, null)]))
+    .then(([on, mem, choice, featured, seen, clicked, priceCache, use]) => {
+    prices = priceCache && typeof priceCache === "object" ? priceCache : {};
+    if (use && typeof use === "object") usage = Object.assign(usage, use);
     lastClick = clicked && typeof clicked === "object" ? clicked : null;
     enabled = !!on;
     sortChoice = choice === "trust" || choice === "unit" ? choice : null;

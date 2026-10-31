@@ -5,6 +5,17 @@ var DSA_CONFIG = {
   // Hide promo / ad blocks between results (Haul carousels, brand banners, video ads…) while on.
   hideClutter: true,
 
+  // "Scan for off-Amazon prices" (button in the Disenshittify box): looks up listings with a manufacturer
+  // model number on UPCitemdb's free plan and shows "Found at MERCHANT for PRICE". Userscript only.
+  priceCheck: {
+    enabled: true,
+    minPrice: 30,          // only listings over this price
+    searchLimit: 20,       // UPCitemdb's free plan: 100 requests a day, of which 20 can be searches
+    delayMs: 3000,         // between requests, one at a time
+    cacheHours: 72,        // results (found or not) are reused for this long
+    maxOfferAgeDays: 60    // ignore store prices UPCitemdb hasn't seen for longer than this
+  },
+
   // Brand lists live in src/brands.js. Learned brands and your own Trust/Block choices
   // are kept in browser storage (see src/memory.js).
 

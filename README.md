@@ -34,18 +34,34 @@ If Amazon opens a different size or colour than the result you clicked (it often
 
 Back on the search results, a checked listing uses the refined rating for 30 days and its pill gets a ✓. Settings live in `productWeights` in `src/config.js`.
 
+**Scan for off-Amazon prices.** A button in the Disenshittify box — "Scan for off-Amazon prices: 2/20 used so far today" — starts a scan: every listing that has a manufacturer model number (e.g. "(DCF787D1)", "3453-20") and costs over $30 — in any department — is looked up in [UPCitemdb](https://www.upcitemdb.com)'s product database as it comes into view, one at a time, one request per listing, so results you never scroll to cost nothing. The button then reads "Stop scanning…"; the scan lasts until you stop it, leave the page, or reach the daily limit. If an identical item is sold elsewhere — the same model number with nothing else bundled (no accessory sets, no "W/ blower", no 2-packs, no batteries or parts that merely mention the model), new, in stock, by a US store other than Amazon or eBay, at a price UPCitemdb has seen in the last 60 days — the cheapest appears in a blue box beside the Amazon price: "Found at MERCHANT for PRICE", linked to that store's listing (through UPCitemdb's redirect), with "View Google Shopping results" underneath. Listings with nothing identical are left exactly as they are. Nothing is looked up unless you start a scan. UPCitemdb's free plan allows 100 requests a day per internet connection, but only 20 of them can be searches, and each listing takes one search, so the button counts against 20 (about 20 listings a day), with no sign-up; the count comes from UPCitemdb's own replies. Results are kept for 72 hours, so repeat searches don't spend requests on listings already checked. UPCitemdb's store prices can lag behind the stores' own — hover the box to see when the price was seen. Settings are in `priceCheck` in `src/config.js`.
+
 **Books, films, TV, music and games are left alone.** The trust signals are for physical goods, so books (print, Kindle, audiobooks), films and TV (DVD, Blu-ray, Prime Video), music (CDs, vinyl) and video games get no rating. Their product pages get no panel; a search where nearly all the results (80%+) are media gets no Disenshittify at all (no toggle, nothing re-ordered or removed); on mixed searches the media results get no badge or colour and keep the places Amazon gave them, with the rated listings sorted around them — so a search for a game keeps the game on top. Game controllers, consoles, headsets, chargers and other accessories are still rated.
+
+The Disenshittify box stays in view: once you scroll past it, it floats at the top of the window over the filter column, and settles back into place when you scroll up.
 
 Turning it off puts the page back the way Amazon served it. The toggle state is remembered, so it stays on as you move between searches and pages.
 
 ## Permissions and privacy
 
-- **Userscript:** runs only on Amazon search results pages (`https://www.amazon.com/s*`) and product pages (`/dp/…`, `/gp/product/…`), on www.amazon.com and amazon.com, not in frames. Not on cart, checkout, account or order pages. Grants: `GM_getValue` / `GM_setValue` (the script's private storage). No network access.
+- **Userscript:** runs only on Amazon search results pages (`https://www.amazon.com/s*`) and product pages (`/dp/…`, `/gp/product/…`), on www.amazon.com and amazon.com, not in frames. Not on cart, checkout, account or order pages. Grants: `GM_getValue` / `GM_setValue` (the script's private storage) and `GM_xmlhttpRequest` limited by `@connect` to `api.upcitemdb.com` (the off-Amazon price scan).
 - **Add-on:** `storage`, and content scripts on the same search and product-page URLs only (no broader host access).
-- **Nothing is sent anywhere.** The code makes no network requests of any kind; everything is read from the page you're viewing.
-- **Stored locally, in the script's private storage:** whether it's on, your Sort by choice, the search term where you last picked "Featured", the product ID of the search result you last clicked, your brand votes, learned brand data (product IDs, scores, review counts, and up to 20 search terms per brand, capped at 3,000 brands), and the ratings of the 300 most recently seen listings — their search-results reasons, the search term they came from, and any product-page check. "Reset learning" under Brands clears the learned data; removing the script clears everything. Nothing is written to amazon.com's own storage (a v0.1 leftover there is migrated and deleted on first run).
+- **What is sent, and where:** only while a scan you started is running: the brand and model number of each listing that has one, costs over $30 and scrolls into view (e.g. "DEWALT DCF787D1"), sent to `api.upcitemdb.com`, one request per listing. No cookies, account or key are involved. Nothing else leaves your browser, and nothing is sent anywhere unless you press the button. Set `priceCheck.enabled: false` in `src/config.js` to remove the button. The add-on version doesn't have the price scan and makes no requests at all.
+- **Stored locally, in the script's private storage:** whether it's on, your Sort by choice, the search term where you last picked "Featured", the product ID of the search result you last clicked, your brand votes, learned brand data (product IDs, scores, review counts, and up to 20 search terms per brand, capped at 3,000 brands), and the price-scan results (store, price and link per model number, up to 500, for 72 hours) and today's UPCitemdb request count and the ratings of the 300 most recently seen listings — their search-results reasons, the search term they came from, and any product-page check. "Reset learning" under Brands clears the learned data; removing the script clears everything. Nothing is written to amazon.com's own storage (a v0.1 leftover there is migrated and deleted on first run).
 - Listing text is only ever inserted as plain text (no `innerHTML`/`eval`), so a listing title can't inject code.
 - **Updates:** installed from the link above, Tampermonkey/Violentmonkey check this repository for newer versions and update automatically when `@version` goes up. Installed by pasting the script in by hand, it never updates on its own.
+
+## Browsers and userscript managers
+
+| | Desktop | Mobile |
+|---|---|---|
+| **Firefox** | Tampermonkey, Violentmonkey or Greasemonkey | Firefox for Android with Tampermonkey or Violentmonkey |
+| **Chrome / Edge / Brave** | Tampermonkey (turn on **Allow user scripts** on its extension details page — Chrome 138+). Violentmonkey's stable version no longer runs on Chrome (Manifest V2 was removed); its Manifest V3 version is a beta | Chrome for Android has no extensions |
+| **Safari** | Userscripts (free) or Tampermonkey for Safari | iPhone/iPad: the Userscripts app (free) |
+
+- Uses `GM_*` functions where available (Tampermonkey, Violentmonkey) and Greasemonkey 4's `GM.*` functions otherwise. Runs in the manager's isolated script context (`@inject-into content` for Violentmonkey).
+- On Amazon's mobile site there is no filter column, so the Disenshittify box sits above the results, and there is no Sort by menu, so the Disenshittified sorts aren't offered (the default trust order still applies). Product-page ratings read the mobile layout too.
+- The Amazon app is not a browser and can't run userscripts.
 
 ## Install
 
@@ -76,7 +92,7 @@ All thresholds are in `learning` in `src/config.js`. Memory is kept in your brow
 
 ## How listings are scored
 
-Everything is read from the results page itself — no product pages are fetched and nothing leaves your browser. Each listing starts at 55 points.
+Scoring reads everything from the results page itself — no product pages are fetched and nothing is sent anywhere for it. Each listing starts at 55 points.
 
 | Signal | Points |
 |---|---|
@@ -121,7 +137,9 @@ src/brands.js          starter known-brand and junk-brand lists
 src/memory.js          brand learning (pure functions)
 src/bigrams.js         English letter-pair model for gibberish detection
 src/scorer.js          scoring logic (pure, no DOM — runs in Node too)
-src/content.js         toggle, scraping, colouring, sorting, restore
+src/product.js         product-page reading and refined ratings
+src/pricecheck.js      model numbers and identical-item matching for the price scan (pure)
+src/content.js         toggle, scraping, colouring, sorting, restore, price scan
 src/styles.css         injected styles
 tools/train_bigrams.py rebuilds src/bigrams.js from local English text
 tools/build_userscript.js  builds dist/disenshittify-amazon.user.js (ASCII-only)
@@ -136,6 +154,7 @@ node test/score.test.js --verbose  # every listing with its reasons
 node test/memory.test.js           # learning across several searches
 node test/live.test.js             # captured live pages: harmonica, window fans, baby strollers, shop vacs
 node test/product.test.js          # product-page refinement on 16 captured live product pages
+node test/pricecheck.test.js       # identical-item matching on real Amazon, Google and UPCitemdb titles
 node test/memory-footprint.js      # the script's own memory use, and a leak check
 node test/ui.test.js               # full userscript in headless Chromium (needs Playwright)
 ```

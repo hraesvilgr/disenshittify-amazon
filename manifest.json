@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Disenshittify Amazon",
-  "version": "0.7.2",
+  "version": "0.9.3",
   "description": "Rates Amazon search results by trustworthiness, tints them green to red, and sorts the junk to the bottom.",
   "icons": {
     "48": "icons/icon.svg",
@@ -29,6 +29,7 @@
         "src/scorer.js",
         "src/memory.js",
         "src/product.js",
+        "src/pricecheck.js",
         "src/content.js"
       ],
       "css": [

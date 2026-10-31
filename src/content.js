@@ -13,13 +13,16 @@
   const SCORER = globalThis.DSA_SCORER;
   const MEMORY = globalThis.DSA_MEMORY;
   const PRODUCT = globalThis.DSA_PRODUCT;
+  const PRICECHECK = globalThis.DSA_PRICECHECK;
   const CARD_SEL = 'div[data-component-type="s-search-result"]';
   const KEY_ENABLED = "dsaEnabled";
   const KEY_SORT = "dsaSort";                 // "trust" | "unit" | null (Amazon's own sort)
   const KEY_FEATURED_FOR = "dsaFeaturedFor";  // search where you picked Amazon's raw "Featured"
   const KEY_OLD_UNIT_SORT = "dsaUnitSort";    // v0.4.x
-  const KEY_LISTINGS = "dsaListings";
-  const KEY_LAST_CLICK = "dsaLastClick";      // the search result you last clicked through: {a: ASIN, at}         // per-ASIN: search-results estimate + product-page check
+  const KEY_LISTINGS = "dsaListings";         // per-ASIN: search-results estimate + product-page check
+  const KEY_LAST_CLICK = "dsaLastClick";      // the search result you last clicked through: {a: ASIN, at}
+  const KEY_PRICES = "dsaOffPrices";          // off-Amazon price scans: query → { at, f: {m, p, u, at} | 0 }
+  const KEY_PRICE_USAGE = "dsaUpcUsage";      // UPCitemdb free-plan use today: { used, limit, resetAt }
   const LISTINGS_MAX = 300;                   // most recently seen listings kept
   const CHECK_TTL = 30 * 864e5;               // product-page checks are reused for 30 days
   const KEY_MEMORY = "dsaMemory";
@@ -43,8 +46,13 @@
   // Extension storage as an add-on; Tampermonkey/Violentmonkey storage as a userscript;
   // localStorage as a last resort. Values are stored as plain JSON-able objects.
 
-  const hasExtStorage = !!(ext && ext.storage && ext.storage.local);
+  // As a userscript, the manager's storage always wins: GM_getValue/GM_setValue (Tampermonkey,
+  // Violentmonkey) or GM.getValue/GM.setValue (Greasemonkey 4). Some managers run scripts where an
+  // extension API object is visible too; that storage belongs to the manager, not to this script.
   const hasGM = typeof GM_getValue === "function" && typeof GM_setValue === "function";
+  const GM4 = typeof GM !== "undefined" && GM && typeof GM.getValue === "function" && typeof GM.setValue === "function" ? GM : null;
+  const isUserscript = hasGM || !!GM4 || typeof GM_info !== "undefined";
+  const hasExtStorage = !isUserscript && !!(ext && ext.storage && ext.storage.local);
 
   async function storeGet(key, fallback) {
     try {
@@ -52,10 +60,13 @@
         const r = await ext.storage.local.get(key);
         return r && key in r ? r[key] : fallback;
       }
-      if (hasGM) {
+      if (hasGM || GM4) {
         // Private script storage only; amazon.com's own localStorage is never read or written here.
-        const v = await GM_getValue(key, undefined);
-        return v === undefined ? fallback : v;
+        // (Greasemonkey 4 stores only strings, numbers and booleans, so objects go in as JSON there.)
+        const v = hasGM ? await GM_getValue(key, undefined) : await GM4.getValue(key, undefined);
+        if (v === undefined) return fallback;
+        if (!hasGM && typeof v === "string" && v.startsWith("\u0001")) return JSON.parse(v.slice(1));
+        return v;
       }
       const raw = localStorage.getItem(key);
       if (raw == null) return fallback;
@@ -70,6 +81,7 @@
     try {
       if (hasExtStorage) return ext.storage.local.set({ [key]: value });
       if (hasGM) return GM_setValue(key, value);
+      if (GM4) return GM4.setValue(key, value !== null && typeof value === "object" ? "\u0001" + JSON.stringify(value) : value);
       localStorage.setItem(key, JSON.stringify(value));
     } catch (e) { /* storage full or blocked — carry on without saving */ }
   }
@@ -298,7 +310,7 @@
     delete card.dataset.dsaTier;
     delete card.dataset.dsaUnit;
     card.classList.remove("dsa-rated", "dsa-dupe", "dsa-wide");
-    card.querySelectorAll(".dsa-badge").forEach(b => b.remove());
+    card.querySelectorAll(".dsa-badge, .dsa-found").forEach(b => b.remove());
     card.querySelectorAll(".dsa-paint").forEach(t => t.classList.remove("dsa-paint"));
     if (card.classList.contains("dsa-paint")) card.classList.remove("dsa-paint");
   }
@@ -437,7 +449,7 @@
     const old = document.getElementById("dsa-product");
     if (!enabled) { if (old) old.remove(); return; }
     const anchor = document.querySelector("#titleSection, #title_feature_div, #title");
-    if (!anchor || !document.querySelector("#productTitle")) return;
+    if (!anchor || !PRODUCT.productTitle(document)) return;
     if (PRODUCT.isMediaPage(document)) { if (old) old.remove(); return; }   // books, films, TV, music, games
     try {
       const product = PRODUCT.extractProduct(document);
@@ -467,6 +479,219 @@
         el("div", { class: "dsa-ph-compare" }, "Couldn't rate this page: " + (e && e.message || e)));
       if (old) old.replaceWith(panel); else anchor.insertAdjacentElement("afterend", panel);
     }
+  }
+
+  // ---------- "Found at MERCHANT for PRICE" (off-Amazon price scan, UPCitemdb) ----------
+  // Nothing is looked up automatically. "Scan for off-Amazon prices" in the Disenshittify box looks up
+  // listings anywhere on Amazon that have a manufacturer model number and cost over $30, one at a time,
+  // on UPCitemdb's free plan (100 requests a day per connection, no sign-up), as they scroll into view,
+  // and shows the cheapest identical item sold new elsewhere. Results are kept for 72 hours.
+  // Userscript only (GM_xmlhttpRequest).
+
+  const PC = CFG.priceCheck || {};
+  const xhr = typeof GM_xmlhttpRequest === "function" ? GM_xmlhttpRequest
+    : typeof GM !== "undefined" && GM && typeof GM.xmlHttpRequest === "function" ? o => GM.xmlHttpRequest(o) : null;   // Greasemonkey 4
+  const canFetch = !!xhr;
+  let prices = {};
+  let usage = { used: 0, limit: 100, resetAt: 0 };
+  let scanning = false;
+  let scanNote = "";
+  const pqByQ = new Map();
+
+  function priceAvailable() { return !!(PC.enabled && canFetch && PRICECHECK); }
+
+  function gmGet(url) {
+    return new Promise(resolve => {
+      xhr({
+        method: "GET", url, timeout: 20000, headers: { Accept: "application/json" },
+        onload: r => resolve({ status: r.status, headers: r.responseHeaders || "", text: r.responseText || "" }),
+        onerror: () => resolve({ status: 0, headers: "", text: "" }),
+        ontimeout: () => resolve({ status: 0, headers: "", text: "" })
+      });
+    });
+  }
+  const header = (h, name) => { const m = new RegExp("^" + name + ":\\s*(.+)$", "im").exec(h); return m ? m[1].trim() : null; };
+
+  // Today's use of the free plan, from UPCitemdb's own rate-limit headers.
+  function usedToday() {
+    if (usage.resetAt && Date.now() > usage.resetAt) usage = { used: 0, limit: usage.limit || 100, resetAt: 0 };
+    return usage;
+  }
+  function noteUsage(res) {
+    const limit = parseInt(header(res.headers, "X-RateLimit-Limit"), 10);
+    const remaining = parseInt(header(res.headers, "X-RateLimit-Remaining"), 10);
+    const reset = parseInt(header(res.headers, "X-RateLimit-Reset"), 10);
+    if (!isNaN(limit) && !isNaN(remaining)) usage = { used: Math.max(0, limit - remaining), limit, resetAt: !isNaN(reset) ? reset * 1000 : usage.resetAt };
+    else usage = { used: usedToday().used + 1, limit: usage.limit || 100, resetAt: usage.resetAt || Date.now() + 864e5 };
+    storeSet(KEY_PRICE_USAGE, usage);
+  }
+
+  function priceQuery(raw, result) {
+    const price = PRICECHECK.priceValue(raw.price);
+    if (price == null || price <= (PC.minPrice || 0)) return null;
+    const title = (result.listing && result.listing.title) || raw.title.replace(/^sponsored( ad)?\s*[-–:]\s*/i, "");
+    const model = PRICECHECK.modelFromTitle(title);
+    if (!model) return null;
+    let brand = (result.brand && result.brand.name) || raw.brandLine || "";
+    // Spell the brand the way the listing does ("DEWALT", not the brand list's "DeWalt").
+    if (brand && title.toUpperCase().startsWith(brand.toUpperCase())) brand = title.slice(0, brand.length);
+    const q = (brand && !model.toUpperCase().includes(brand.toUpperCase()) ? brand + " " : "") + model;
+    return { q, model, title };
+  }
+
+  function renderFound(card, q, f) {
+    card.querySelectorAll(".dsa-found").forEach(n => n.remove());
+    if (!f || !f.u) return;   // nothing identical found: leave the card exactly as it is
+    const recipe = card.querySelector('[data-cy="price-recipe"]') ||
+      (card.querySelector(".a-price") && card.querySelector(".a-price").parentElement);
+    if (!recipe) return;
+    const when = f.at ? new Date(f.at * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
+    const box = el("div", { class: "dsa-found" },
+      el("a", { class: "dsa-found-main", href: f.u, target: "_blank", rel: "noopener noreferrer nofollow",
+        title: `Price seen ${when ? "on " + when + " " : ""}by UPCitemdb; check the store's page for today's price` },
+        `Found at ${f.m} for ${f.p}`),
+      el("a", { class: "dsa-found-google", href: PRICECHECK.shoppingUrl(q), target: "_blank", rel: "noopener noreferrer" },
+        "View Google Shopping results"));
+    box.addEventListener("click", e => e.stopPropagation());
+    recipe.insertBefore(box, recipe.firstChild);
+  }
+
+  function renderPriceFor(q) {
+    const hit = prices[q];
+    for (const card of cards()) if (card.dataset.dsaPriceQ === q) renderFound(card, q, hit && hit.f);
+  }
+
+  // On every scoring pass: note which listings can be scanned, and show results already in hand.
+  function preparePriceChecks(rated, raws, results) {
+    if (!priceAvailable()) return;
+    rated.forEach((card, i) => {
+      const pq = priceQuery(raws[i], results.get(i));
+      if (!pq) { delete card.dataset.dsaPriceQ; return; }
+      card.dataset.dsaPriceQ = pq.q;
+      pqByQ.set(pq.q, pq);
+      if (priceFresh(pq.q)) renderFound(card, pq.q, prices[pq.q].f);
+      watchForScan(card);
+    });
+    updateScanButton();
+  }
+
+  // Scanning is switched on with the button and then follows your scrolling: each listing is looked up
+  // when it comes into view, so results you never reach cost nothing. One request per listing.
+  let scanOn = false;
+  const scanQueue = [];
+  const scanQueued = new Set();
+  const scanTally = { found: 0, none: 0 };
+  const priceFresh = q => { const hit = prices[q]; return hit && Date.now() - hit.at < (PC.cacheHours || 72) * 36e5; };
+
+  const scanObserver = typeof IntersectionObserver === "function" ? new IntersectionObserver(entries => {
+    if (!scanOn) return;
+    for (const e of entries) if (e.isIntersecting) queueCard(e.target);
+    runScan();
+  }, { threshold: 0.4 }) : null;
+
+  function watchForScan(card) { if (scanObserver && card.dataset.dsaPriceQ) scanObserver.observe(card); }
+
+  function queueCard(card) {
+    const q = card.dataset.dsaPriceQ;
+    if (!q || card.classList.contains("dsa-dupe") || scanQueued.has(q) || priceFresh(q)) return;
+    scanQueued.add(q);
+    scanQueue.push(q);
+  }
+
+  function inView(card) {
+    const r = card.getBoundingClientRect();
+    return r.bottom > 0 && r.top < (window.innerHeight || document.documentElement.clientHeight) && r.width > 0;
+  }
+
+  function updateScanButton() {
+    const btn = document.querySelector("#dsa-toggle .dsa-scan");
+    const note = document.querySelector("#dsa-toggle .dsa-scan-note");
+    if (!btn) return;
+    const box = btn.parentElement;
+    box.hidden = !enabled || !priceAvailable();
+    const u = usedToday();
+    // The free plan allows 100 requests a day, but only 20 of them can be searches, and every scan
+    // request is a search, so count against 20.
+    const cap = PC.searchLimit || 20;
+    btn.textContent = (scanOn ? "Stop scanning for off-Amazon prices" : "Scan for off-Amazon prices") + `: ${Math.min(u.used, cap)}/${cap} used so far today`;
+    btn.setAttribute("aria-pressed", scanOn ? "true" : "false");
+    if (note) note.textContent = scanNote;
+  }
+
+  function scanPrices() {
+    if (!priceAvailable()) return;
+    if (scanOn) { scanOn = false; scanQueue.length = 0; scanQueued.clear(); scanNote = scanSummary("Stopped."); updateScanButton(); return; }
+    const eligible = cards().filter(c => c.dataset.dsaPriceQ && !c.classList.contains("dsa-dupe"));
+    if (!eligible.length) {
+      scanNote = "No listings here have a manufacturer model number and a price over $" + (PC.minPrice || 0) + ".";
+      updateScanButton();
+      return;
+    }
+    scanOn = true;
+    scanTally.found = scanTally.none = 0;
+    eligible.filter(inView).forEach(queueCard);
+    scanNote = scanQueue.length ? "" : "Listings in view are already checked. Scroll to check more.";
+    updateScanButton();
+    runScan();
+  }
+
+  function scanSummary(prefix) {
+    const n = scanTally.found + scanTally.none;
+    return (prefix ? prefix + " " : "") + (n ? `Checked ${n}: found ${scanTally.found} elsewhere, ${scanTally.none} not found.` : "");
+  }
+
+  async function runScan() {
+    if (scanning) return;
+    scanning = true;
+    try {
+      while (scanOn && enabled && scanQueue.length) {
+        const q = scanQueue.shift();
+        const pq = pqByQ.get(q);
+        if (!pq || priceFresh(q)) continue;
+        scanNote = `Checking ${q}…` + (scanQueue.length ? ` (${scanQueue.length} more in view)` : "");
+        updateScanButton();
+        let res = await gmGet(PRICECHECK.searchUrl(q));
+        noteUsage(res);
+        if (res.status === 429 && /TOO_FAST/i.test(res.text)) {   // too many in a short burst: wait and retry once
+          await new Promise(r => setTimeout(r, 31000));
+          res = await gmGet(PRICECHECK.searchUrl(q));
+          noteUsage(res);
+        }
+        if (res.status === 429) {
+          const after = parseInt(header(res.headers, "Retry-After"), 10);
+          if (!isNaN(after)) usage.resetAt = Date.now() + after * 1000;
+          usage.used = Math.max(usage.limit, PC.searchLimit || 20); storeSet(KEY_PRICE_USAGE, usage);
+          scanOn = false; scanQueue.length = 0; scanQueued.clear();
+          scanNote = scanSummary(`UPCitemdb's free daily limit is used up${!isNaN(after) ? ` (resets in about ${Math.ceil(after / 3600)} h)` : ""}.`);
+          console.info("[Disenshittify] price scan: daily limit reached", res.text.slice(0, 200));
+          break;
+        }
+        let json = null;
+        try { json = JSON.parse(res.text); } catch (e) { /* not JSON */ }
+        if (res.status !== 200 || !json || json.code !== "OK") {
+          scanQueued.delete(q);   // try again if it comes back into view
+          console.info(`[Disenshittify] price scan: ${q} — no answer (HTTP ${res.status}${json && json.code ? ", " + json.code : ""})`);
+        } else {
+          const f = PRICECHECK.pickOffer(json, pq.model, pq.title, Date.now(), PC.maxOfferAgeDays || 60);
+          prices[q] = { at: Date.now(), f: f ? { m: f.m, p: f.p, u: f.u, at: f.at } : 0 };
+          if (f) scanTally.found++; else scanTally.none++;
+          console.info(`[Disenshittify] price scan: ${q} — ${(json.items || []).length} products; ` + (f ? `cheapest identical: ${f.m} ${f.p}` : "no identical item sold new elsewhere"));
+          renderPriceFor(q);
+          savePrices();
+        }
+        if (scanQueue.length) await new Promise(r => setTimeout(r, PC.delayMs || 3000));
+      }
+      if (scanOn) scanNote = scanSummary("") + (scanSummary("") ? " " : "") + "Scroll to check more.";
+    } finally {
+      scanning = false;
+      updateScanButton();
+    }
+  }
+
+  function savePrices() {
+    const keys = Object.keys(prices);
+    if (keys.length > 500) keys.sort((a, b) => prices[a].at - prices[b].at).slice(0, keys.length - 500).forEach(k => delete prices[k]);
+    storeSet(KEY_PRICES, prices);
   }
 
   // ---------- promos and ad blocks ----------
@@ -611,6 +836,7 @@
         if (/^More results/i.test((node.innerText || node.textContent || "").trim())) node.classList.toggle("dsa-stray-head", mode !== "amazon");
       }
 
+      preparePriceChecks(rated, raws, results);
       const hidden = CFG.hideClutter === false ? 0 : removeClutter();
       lastResults = results;
       lastPromoCount = promosRemoved;
@@ -916,6 +1142,7 @@
       enabled = input.checked;
       storeSet(KEY_ENABLED, enabled);
       if (enabled) { installSortOption(); apply(); } else { removeSortOption(); restore(); }
+      updateScanButton();
     });
     const wrap = el("div", { id: "dsa-toggle" },
       el("label", { class: "dsa-switch" },
@@ -924,6 +1151,9 @@
         el("span", { class: "dsa-label" }, "Disenshittify")),
       el("div", { class: "dsa-status" }, "Off"),
       el("div", { class: "dsa-legend", "aria-hidden": "true" }, el("span")),
+      el("div", { class: "dsa-scanbox", hidden: "" },
+        el("button", { type: "button", class: "dsa-scan", on: { click: e => { e.preventDefault(); scanPrices(); } } }, "Scan for off-Amazon prices"),
+        el("div", { class: "dsa-scan-note" })),
       el("button", {
         type: "button", class: "dsa-manage",
         on: { click: e => { e.preventDefault(); panelOpen = !panelOpen; renderPanel(); } }
@@ -946,6 +1176,37 @@
       slot.parentElement.insertBefore(toggle, slot);
     }
     updateStatus(null);
+    updateScanButton();
+    floatToggle(toggle);
+  }
+
+  // Keep the Disenshittify box in view: once its place in the column scrolls off the top of the
+  // window, it floats at the top of the window over the filter column (same position and width),
+  // and settles back into place when you scroll up again.
+  function floatToggle(toggle) {
+    if (typeof IntersectionObserver !== "function") return;
+    const spot = el("div", { class: "dsa-spot" });
+    toggle.parentElement.insertBefore(spot, toggle);
+    const place = () => {
+      if (!toggle.classList.contains("dsa-float")) return;
+      const r = spot.getBoundingClientRect();
+      toggle.style.left = r.left + "px";
+      toggle.style.width = r.width + "px";
+    };
+    new IntersectionObserver(([e]) => {
+      const off = !e.isIntersecting && e.boundingClientRect.top < 0;
+      if (off === toggle.classList.contains("dsa-float")) return;
+      if (off) {
+        spot.style.height = toggle.offsetHeight + "px";
+        toggle.classList.add("dsa-float");
+        place();
+      } else {
+        toggle.classList.remove("dsa-float");
+        toggle.style.left = toggle.style.width = "";
+        spot.style.height = "";
+      }
+    }, { threshold: 0 }).observe(spot);
+    window.addEventListener("resize", place, { passive: true });
   }
 
   // ---------- keep up with Amazon's in-page updates ----------
@@ -991,18 +1252,20 @@
     if (!enabled || PRODUCT.isProductPage(location)) return;
     const a = e.target.closest && e.target.closest("a[href]");
     const card = a && a.closest(CARD_SEL);
-    if (!card || !card.dataset.asin || a.closest(".dsa-badge")) return;
+    if (!card || !card.dataset.asin || a.closest(".dsa-badge, .dsa-found")) return;
     lastClick = { a: card.dataset.asin, at: Date.now() };
     storeSet(KEY_LAST_CLICK, lastClick);
   };
   document.addEventListener("click", noteClick, true);
   document.addEventListener("auxclick", noteClick, true);
 
-  console.info("[Disenshittify] running on this page");
+  const INFO = typeof GM_info !== "undefined" ? GM_info : typeof GM !== "undefined" && GM && GM.info ? GM.info : null;
+  console.info("[Disenshittify] running on this page (v" + ((INFO && INFO.script && INFO.script.version) || "add-on") +
+    (INFO ? ", " + (INFO.scriptHandler || "userscript manager") + (INFO.injectInto ? ", " + INFO.injectInto + " mode" : "") : "") + ")");
   // v0.1 kept the on/off flag in amazon.com's own localStorage, where Amazon's scripts can see it.
   // Move it into the script's private storage and delete it from the site.
   async function migrateOldSettings() {
-    if (!hasExtStorage && !hasGM) return;
+    if (!hasExtStorage && !hasGM && !GM4) return;
     try {
       const old = localStorage.getItem(KEY_ENABLED);
       if (old !== null) {
@@ -1014,10 +1277,14 @@
       storeSet(KEY_SORT, "unit");
     }
     storeSet(KEY_OLD_UNIT_SORT, false);
+    for (const old of ["dsaPrices", "dsaPrices2", "dsaPrices3", "dsaPricePause"]) if ((await storeGet(old, null)) !== null) storeSet(old, null);   // v0.8.0–0.8.5 Google price checks
   }
 
   migrateOldSettings().then(() => Promise.all([storeGet(KEY_ENABLED, false), storeGet(KEY_MEMORY, null),
-    storeGet(KEY_SORT, null), storeGet(KEY_FEATURED_FOR, ""), storeGet(KEY_LISTINGS, {}), storeGet(KEY_LAST_CLICK, null)])).then(([on, mem, choice, featured, seen, clicked]) => {
+    storeGet(KEY_SORT, null), storeGet(KEY_FEATURED_FOR, ""), storeGet(KEY_LISTINGS, {}), storeGet(KEY_LAST_CLICK, null), storeGet(KEY_PRICES, {}), storeGet(KEY_PRICE_USAGE, null)]))
+    .then(([on, mem, choice, featured, seen, clicked, priceCache, use]) => {
+    prices = priceCache && typeof priceCache === "object" ? priceCache : {};
+    if (use && typeof use === "object") usage = Object.assign(usage, use);
     lastClick = clicked && typeof clicked === "object" ? clicked : null;
     enabled = !!on;
     sortChoice = choice === "trust" || choice === "unit" ? choice : null;

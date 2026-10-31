@@ -25,6 +25,11 @@
     return rows;
   }
 
+  // Desktop: #productTitle. Mobile site: <span id="title"> inside the title section.
+  function productTitle(doc) {
+    return T(doc.querySelector("#productTitle")) || T(doc.querySelector("#titleSection #title, #title_feature_div #title, h1#title"));
+  }
+
   function extractProduct(doc) {
     const q = s => doc.querySelector(s);
     const rows = detailRows(doc);
@@ -48,13 +53,20 @@
       if (m && histogram[m[2]] === undefined) histogram[m[2]] = +m[1];
     }
 
-    const ratingM = /([\d.]+) out of 5/.exec((q("#acrPopover") && q("#acrPopover").getAttribute("title")) || T(q("#acrPopover")));
-    const countM = /([\d,]+)/.exec(T(q("#acrCustomerReviewText")));
+    // Desktop: #acrPopover title "4.4 out of 5 stars" + #acrCustomerReviewText "(2,764)".
+    // Mobile site: one link, "#acrCustomerReviewLink", reading "4.4 4.4 out of 5 stars (2,764)".
+    const mobileAcr = T(q("#acrCustomerReviewLink"));
+    const ratingM = /([\d.]+) out of 5/.exec((q("#acrPopover") && q("#acrPopover").getAttribute("title")) || T(q("#acrPopover")) || mobileAcr);
+    const countM = /([\d,]+)/.exec(T(q("#acrCustomerReviewText"))) || /\(([\d,]+)\)/.exec(mobileAcr);
 
     // Seller: "Ships from Amazon / Sold by Pavsrmy" boxes, or the older "Sold by X and Fulfilled by Amazon" line.
-    const feature = name => T(q(`[offer-display-feature-name="${name}"] .offer-display-feature-text-message`));
-    let soldBy = feature("desktop-merchant-info") || T(q("#sellerProfileTriggerId"));
-    let shipsFrom = feature("desktop-fulfiller-info");
+    // (The mobile site uses "mobile-…" names, and puts the value in an offer-display-attribute-name element.)
+    const feature = name => T(q(`[offer-display-feature-name="desktop-${name}"] .offer-display-feature-text-message, ` +
+      `[offer-display-attribute-name="desktop-${name}"] .offer-display-feature-text-message, ` +
+      `[offer-display-attribute-name="mobile-${name}"] .offer-display-feature-text-message, ` +
+      `[offer-display-feature-name="mobile-${name}"] .offer-display-feature-text-message`));
+    let soldBy = feature("merchant-info") || T(q("#sellerProfileTriggerId"));
+    let shipsFrom = feature("fulfiller-info");
     const merchantLine = T(q("#merchant-info, #merchantInfo"));
     if (!soldBy) { const m = /Sold by (.+?)(?: and | \.|$)/i.exec(merchantLine); if (m) soldBy = m[1]; }
     if (!shipsFrom && /Fulfilled by Amazon|Ships from (and sold by )?Amazon/i.test(merchantLine)) shipsFrom = "Amazon";
@@ -63,7 +75,7 @@
 
     return {
       asin,
-      title: T(q("#productTitle")),
+      title: productTitle(doc),
       brand: brand || null,
       bylineText,
       brandStore: /\/stores\//.test(bylineHref),
@@ -272,7 +284,7 @@
   const GAME_TITLE = /[-–(]\s*(PlayStation ?[45]|PS[45]|Xbox (Series [XS]|One)|Nintendo Switch( 2)?|Steam Deck|PC)\b/i;
   const GAME_HARDWARE = /\b(controllers?|gamepads?|game ?pads?|(joy|thumb|arcade|fight|fighting|flight|control) ?sticks?|joypads?|leverless|hitbox|hotas|throttle|steering|console|system|bundle|headsets?|headphones?|earbuds|speakers?|charg\w*|case|cables?|adapters?|receiver|dongle|stand|docks?|docking|grips?|skins?|triggers?|memory card|sd card|capture card|micro ?sd|ssd|hard drive|storage|mount|keyboard|mouse|mice|wheel|pedals?|joy-?cons?|amiibo|figure|remote|batter(y|ies)|cover|protector|accessor(y|ies)|camera|webcam|microphone|vr|fan|cooling|gift card|subscription|membership|renewed|\d+ ?(TB|GB))\b/i;
 
-  const api = { extractProduct, refineScore, parseDate, isProductPage, isAnonymousSeller, isMediaPage, isMediaCard };
+  const api = { extractProduct, productTitle, refineScore, parseDate, isProductPage, isAnonymousSeller, isMediaPage, isMediaCard };
   if (typeof module !== "undefined") module.exports = api;
   else root.DSA_PRODUCT = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
